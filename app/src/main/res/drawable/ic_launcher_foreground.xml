@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Kamera govdesi -->
+    <path
+        android:fillColor="#00E5A0"
+        android:pathData="M36,44 h36 a4,4 0 0 1 4,4 v20 a4,4 0 0 1 -4,4 h-36 a4,4 0 0 1 -4,-4 v-20 a4,4 0 0 1 4,-4 z" />
+    <!-- Lens -->
+    <path
+        android:fillColor="#101820"
+        android:pathData="M54,58 m-8,0 a8,8 0 1 0 16,0 a8,8 0 1 0 -16,0" />
+    <path
+        android:fillColor="#00E5A0"
+        android:pathData="M54,58 m-4,0 a4,4 0 1 0 8,0 a4,4 0 1 0 -8,0" />
+    <!-- Drone pervane kollari -->
+    <path
+        android:strokeColor="#00E5A0"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="M40,44 L30,34 M68,44 L78,34" />
+    <path
+        android:fillColor="#00E5A0"
+        android:pathData="M22,32 h16 v4 h-16 z M70,32 h16 v4 h-16 z" />
+</vector>

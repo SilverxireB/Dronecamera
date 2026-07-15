@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Drone Kamera</string>
+    <string name="start_shot">DRONE ÇEKİMİ BAŞLAT</string>
+    <string name="stop_shot">DURDUR</string>
+    <string name="mode_zoom_out">Mod: Uzaklaşma (15x → 0.5x)</string>
+    <string name="mode_zoom_in">Mod: Yaklaşma (0.5x → 15x)</string>
+    <string name="duration_10">10 sn</string>
+    <string name="duration_15">15 sn</string>
+    <string name="duration_20">20 sn</string>
+    <string name="duration_30">30 sn</string>
+    <string name="zoom_placeholder">1.0x</string>
+    <string name="zoom_format">%.1fx</string>
+    <string name="countdown_placeholder">15.0 sn</string>
+    <string name="countdown_format">%.1f sn</string>
+    <string name="video_saved">Video kaydedildi: Filmler/DroneCamera</string>
+    <string name="record_error">Kayıt hatası: %d</string>
+    <string name="camera_error">Kamera açılamadı: %s</string>
+    <string name="camera_permission_needed">Uygulamanın çalışması için kamera izni gerekli.</string>
+</resources>
