@@ -1,24 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Drone Kamera</string>
-    <string name="start_shot">DRONE ÇEKİMİ BAŞLAT</string>
-    <string name="stop_shot">DURDUR</string>
-    <string name="mode_zoom_out">Mod: Uzaklaşma (15x → 0.5x)</string>
-    <string name="mode_zoom_in">Mod: Yaklaşma (0.5x → 15x)</string>
-    <string name="mode_zoom_out_single">Mod: Uzaklaşma (8x → 1x)</string>
-    <string name="mode_zoom_in_single">Mod: Yaklaşma (1x → 8x)</string>
-    <string name="single_lens">Tek lens modu (8x → 1x, lens geçişi yok)</string>
-    <string name="duration_10">10 sn</string>
-    <string name="duration_15">15 sn</string>
-    <string name="duration_20">20 sn</string>
-    <string name="duration_30">30 sn</string>
+
+    <!-- Modlar -->
+    <string name="mode_photo">FOTO</string>
+    <string name="mode_video">VİDEO</string>
+    <string name="mode_drone">DRONE</string>
+    <string name="mode_boomerang">BUMERANG</string>
+    <string name="mode_step">KADEMELİ</string>
+    <string name="mode_vertigo">VERTİGO</string>
+    <string name="mode_dronie">DRONIE</string>
+
+    <!-- Secenekler -->
+    <string name="label_duration">Süre</string>
+    <string name="label_curve">Eğri</string>
+    <string name="label_countdown">Sayaç</string>
+    <string name="duration_fmt">%d sn</string>
+    <string name="dir_out">Yön: Uzaklaşma</string>
+    <string name="dir_in">Yön: Yaklaşma</string>
+    <string name="curve_cinematic">Sinematik</string>
+    <string name="curve_linear">Sabit</string>
+    <string name="curve_aggressive">Sert</string>
+    <string name="countdown_off">Kapalı</string>
+    <string name="countdown_3">3 sn</string>
+    <string name="countdown_10">10 sn</string>
+
+    <!-- Gostergeler -->
     <string name="zoom_placeholder">1.0x</string>
     <string name="zoom_format">%.1fx</string>
-    <string name="countdown_placeholder">15.0 sn</string>
-    <string name="countdown_format">%.1f sn</string>
+    <string name="timer_zero">00:00</string>
+    <string name="remaining_fmt">%.0f sn</string>
+
+    <!-- Rehberler -->
+    <string name="vertigo_guide">Kayıt boyunca özneye doğru sabit hızda yürü</string>
+    <string name="dronie_guide">Telefonu yüzüne yakın tut, çekim uzaklaşarak açılır</string>
+
+    <!-- Mesajlar -->
+    <string name="photo_saved">Fotoğraf kaydedildi: Resimler/DroneCamera</string>
     <string name="video_saved">Video kaydedildi: Filmler/DroneCamera</string>
     <string name="record_error">Kayıt hatası: %d</string>
+    <string name="photo_error">Fotoğraf hatası: %s</string>
     <string name="camera_error">Kamera açılamadı: %s</string>
     <string name="camera_permission_needed">Uygulamanın çalışması için kamera izni gerekli.</string>
-    <string name="lock_exposure">Pozlama/renk kilidi (lens geçişini yumuşatır)</string>
+
+    <!-- Erisilebilirlik -->
+    <string name="desc_lock">Pozlama kilidi</string>
+    <string name="desc_lens">Tek lens modu</string>
+    <string name="desc_flip">Kamera değiştir</string>
+    <string name="desc_shutter">Deklanşör</string>
 </resources>
