@@ -46,7 +46,8 @@ Bölge başlıklarıyla gezin (`// ---- ...` yorum satırları):
 
 ## Yapılandırma
 
-- `app/build.gradle.kts`: minSdk 26, compile/target 34, CameraX 1.3.4, viewBinding
+- `app/build.gradle.kts`: minSdk 26, compile/target 34, CameraX 1.3.4, viewBinding,
+  sabit imza (signingConfigs "shared" → app/keystore/dronecamera.keystore)
 - `app/src/main/AndroidManifest.xml`: CAMERA + RECORD_AUDIO izinleri, portrait
 - `build.gradle.kts` / `settings.gradle.kts` / `gradle.properties`: standart
 - `.github/workflows/build-apk.yml`: APK derle → artifact + `son-surum` Release

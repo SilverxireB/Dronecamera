@@ -9,3 +9,4 @@ captures/
 .cxx/
 *.apk
 !gradle/wrapper/gradle-wrapper.jar
+!app/keystore/dronecamera.keystore

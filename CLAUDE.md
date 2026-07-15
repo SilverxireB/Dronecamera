@@ -31,6 +31,9 @@ video çekimleri yapar. Kullanıcı dili: Türkçe. Cihaz: Honor Magic 8 Pro
 - UI: buzlu cam (glass) paneller, çipler kodda üretilir (`buildChips`), XML'de boş
   `optionsRow`/`modeRow` konteynerleri var. Tek vurgu rengi `accentIce` (#9BE8FF).
 - minSdk 26, target/compile 34, CameraX 1.3.4, AGP 8.4.2, JDK 17 (CI).
+- İmza: `app/keystore/dronecamera.keystore` (parola/alias: dronecamera) depoda;
+  debug+release aynı anahtarla imzalanır ki güncellemeler üzerine kurulabilsin.
+  Bilinçli karar (kişisel yan-yükleme uygulaması, Play'e çıkmayacak) — değiştirme.
 
 ## Bekleyen fikirler
 

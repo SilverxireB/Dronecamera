@@ -15,9 +15,24 @@ android {
         versionName = "1.0"
     }
 
+    // Sabit imza anahtari: her derleme ayni imzayi tasir, boylece yeni APK
+    // eskisinin uzerine "paket cakismasi" olmadan kurulabilir.
+    signingConfigs {
+        create("shared") {
+            storeFile = file("keystore/dronecamera.keystore")
+            storePassword = "dronecamera"
+            keyAlias = "dronecamera"
+            keyPassword = "dronecamera"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("shared")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("shared")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
