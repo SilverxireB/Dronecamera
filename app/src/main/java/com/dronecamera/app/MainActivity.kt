@@ -65,6 +65,7 @@ class MainActivity : AppCompatActivity() {
     private var countdownSec = 0
     private var lockExposure = true
     private var singleLens = false
+    private var singleLensStartZoom = 3
     private var useFrontCamera = false
 
     private var isShotRunning = false
@@ -75,10 +76,12 @@ class MainActivity : AppCompatActivity() {
     private val durationChips = linkedMapOf<Int, TextView>()
     private val curveChips = linkedMapOf<ZoomCurve, TextView>()
     private val countdownChips = linkedMapOf<Int, TextView>()
+    private val startZoomChips = linkedMapOf<Int, TextView>()
     private lateinit var directionChip: TextView
     private lateinit var durationLabel: TextView
     private lateinit var curveLabel: TextView
     private lateinit var countdownLabel: TextView
+    private lateinit var startZoomLabel: TextView
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -223,10 +226,27 @@ class MainActivity : AppCompatActivity() {
             countdownChips[sec] = chip
         }
 
+        // Tek lens modunda baslangic zoom secimi. Lens degisim esigi cihaza
+        // gore degisir (Honor Magic 8 Pro'da ~3.5x); esigin altinda kalan bir
+        // baslangic secilirse cekim boyunca hic lens gecisi olmaz.
+        startZoomLabel = makeLabel(R.string.label_start_zoom)
+        binding.optionsRow.addView(startZoomLabel)
+        intArrayOf(2, 3, 4, 6, 8).forEach { z ->
+            val chip = makeChip(getString(R.string.start_zoom_fmt, z))
+            chip.setOnClickListener {
+                if (isShotRunning || isCountingDown) return@setOnClickListener
+                singleLensStartZoom = z
+                markSelected(startZoomChips, z)
+            }
+            binding.optionsRow.addView(chip)
+            startZoomChips[z] = chip
+        }
+
         markSelected(modeChips, mode)
         markSelected(durationChips, durationSec)
         markSelected(curveChips, curve)
         markSelected(countdownChips, countdownSec)
+        markSelected(startZoomChips, singleLensStartZoom)
     }
 
     private fun setupControls() {
@@ -241,6 +261,7 @@ class MainActivity : AppCompatActivity() {
             if (isShotRunning || isCountingDown) return@setOnClickListener
             singleLens = !singleLens
             updateToggleTints()
+            updateUiForMode()
             bindCamera()
         }
         binding.btnFlip.setOnClickListener {
@@ -275,6 +296,10 @@ class MainActivity : AppCompatActivity() {
         curveChips.values.forEach { setVisible(it, showCurve) }
 
         setVisible(binding.btnLens, zoomMode && !mode.usesFrontCamera)
+        val showStartZoom = singleLens && zoomMode && !mode.usesFrontCamera &&
+            mode != CameraMode.VERTIGO
+        setVisible(startZoomLabel, showStartZoom)
+        startZoomChips.values.forEach { setVisible(it, showStartZoom) }
         setVisible(binding.btnFlip, mode == CameraMode.PHOTO || mode == CameraMode.VIDEO)
         setVisible(binding.btnLock, mode.recordsVideo)
 
@@ -413,7 +438,7 @@ class MainActivity : AppCompatActivity() {
         val (targetStart, targetEnd) = when (mode) {
             CameraMode.VERTIGO -> 2f to 1f
             CameraMode.DRONIE -> min(2.5f, state.maxZoomRatio) to state.minZoomRatio
-            else -> if (singleLens) 8f to 1f else 15f to 0.5f
+            else -> if (singleLens) singleLensStartZoom.toFloat() to 1f else 15f to 0.5f
         }
         val start = min(targetStart, state.maxZoomRatio)
         val end = max(targetEnd, state.minZoomRatio)

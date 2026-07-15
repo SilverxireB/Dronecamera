@@ -22,6 +22,8 @@
     <string name="curve_linear">Sabit</string>
     <string name="curve_aggressive">Sert</string>
     <string name="countdown_off">Kapalı</string>
+    <string name="label_start_zoom">Başlangıç</string>
+    <string name="start_zoom_fmt">%dx</string>
     <string name="countdown_3">3 sn</string>
     <string name="countdown_10">10 sn</string>
 
