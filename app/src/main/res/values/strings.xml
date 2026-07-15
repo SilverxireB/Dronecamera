@@ -17,4 +17,5 @@
     <string name="record_error">Kayıt hatası: %d</string>
     <string name="camera_error">Kamera açılamadı: %s</string>
     <string name="camera_permission_needed">Uygulamanın çalışması için kamera izni gerekli.</string>
+    <string name="lock_exposure">Pozlama/renk kilidi (lens geçişini yumuşatır)</string>
 </resources>

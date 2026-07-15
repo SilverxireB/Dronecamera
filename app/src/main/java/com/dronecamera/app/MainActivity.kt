@@ -6,6 +6,7 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.hardware.camera2.CaptureRequest
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -13,6 +14,9 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.CaptureRequestOptions
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
@@ -134,6 +138,7 @@ class MainActivity : AppCompatActivity() {
                     videoCapture
                 )
                 observeZoom()
+                applyCaptureOptions(lockAeAwb = false)
             } catch (e: Exception) {
                 Toast.makeText(this, getString(R.string.camera_error, e.message), Toast.LENGTH_LONG).show()
             }
@@ -144,6 +149,25 @@ class MainActivity : AppCompatActivity() {
         camera?.cameraInfo?.zoomState?.observe(this) { state ->
             binding.zoomText.text = getString(R.string.zoom_format, state.zoomRatio)
         }
+    }
+
+    /**
+     * Lens gecislerinde (telefoto -> ana -> ultra genis) olusan ani parlaklik ve
+     * renk sicramalarini azaltmak icin cekim boyunca pozlama (AE) ve beyaz
+     * dengesi (AWB) kilitlenir. Video stabilizasyonu da gecisleri yumusatir.
+     */
+    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
+    private fun applyCaptureOptions(lockAeAwb: Boolean) {
+        val cameraControl = camera?.cameraControl ?: return
+        val options = CaptureRequestOptions.Builder()
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+            )
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, lockAeAwb)
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, lockAeAwb)
+            .build()
+        Camera2CameraControl.from(cameraControl).setCaptureRequestOptions(options)
     }
 
     /**
@@ -190,14 +214,18 @@ class MainActivity : AppCompatActivity() {
                 is VideoRecordEvent.Start -> {
                     isDroneShotRunning = true
                     updateRecordingUi(true)
-                    // Kisa bir sabit tutus, ardindan akici zoom gecisi.
-                    binding.previewView.postDelayed(
-                        { animateZoom(startZoom, endZoom) },
-                        HOLD_MS
-                    )
+                    // Kisa sabit tutus sirasinda pozlama oturur; sonra AE/AWB
+                    // kilitlenir ve akici zoom gecisi baslar.
+                    binding.previewView.postDelayed({
+                        if (binding.lockExposure.isChecked) {
+                            applyCaptureOptions(lockAeAwb = true)
+                        }
+                        animateZoom(startZoom, endZoom)
+                    }, HOLD_MS)
                 }
                 is VideoRecordEvent.Finalize -> {
                     isDroneShotRunning = false
+                    applyCaptureOptions(lockAeAwb = false)
                     updateRecordingUi(false)
                     if (event.hasError()) {
                         Toast.makeText(
@@ -272,6 +300,7 @@ class MainActivity : AppCompatActivity() {
         binding.countdownText.visibility =
             if (recording) android.view.View.VISIBLE else android.view.View.GONE
         binding.directionToggle.isEnabled = !recording
+        binding.lockExposure.isEnabled = !recording
         for (i in 0 until binding.durationGroup.childCount) {
             binding.durationGroup.getChildAt(i).isEnabled = !recording
         }

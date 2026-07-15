@@ -60,6 +60,19 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <CheckBox
+        android:id="@+id/lockExposure"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp"
+        android:checked="true"
+        android:text="@string/lock_exposure"
+        android:textColor="@android:color/white"
+        android:buttonTint="@color/accent"
+        app:layout_constraintBottom_toTopOf="@id/durationGroup"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
     <RadioGroup
         android:id="@+id/durationGroup"
         android:layout_width="wrap_content"
