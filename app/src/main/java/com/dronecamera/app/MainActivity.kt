@@ -6,6 +6,8 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +17,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
@@ -51,6 +54,12 @@ class MainActivity : AppCompatActivity() {
 
     /** true: uzaklasma (15x -> 0.5x), false: yaklasma (0.5x -> 15x) */
     private var zoomOutMode = true
+
+    /**
+     * Tek lens modu: yalnizca ana fiziksel kamera kullanilir ve zoom 8x-1x
+     * araliginda tamamen dijital yapilir; boylece hic lens gecisi olmaz.
+     */
+    private var singleLensMode = false
 
     private var isDroneShotRunning = false
 
@@ -100,11 +109,22 @@ class MainActivity : AppCompatActivity() {
                 else -> 15
             }
         }
+
+        binding.singleLens.setOnCheckedChangeListener { _, checked ->
+            singleLensMode = checked
+            updateDirectionLabel()
+            startCamera() // Kamerayi secilen moda gore yeniden bagla.
+        }
     }
 
     private fun updateDirectionLabel() {
         binding.directionToggle.text = getString(
-            if (zoomOutMode) R.string.mode_zoom_out else R.string.mode_zoom_in
+            when {
+                zoomOutMode && singleLensMode -> R.string.mode_zoom_out_single
+                zoomOutMode -> R.string.mode_zoom_out
+                singleLensMode -> R.string.mode_zoom_in_single
+                else -> R.string.mode_zoom_in
+            }
         )
     }
 
@@ -133,7 +153,7 @@ class MainActivity : AppCompatActivity() {
                 provider.unbindAll()
                 camera = provider.bindToLifecycle(
                     this,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    chooseCameraSelector(provider),
                     preview,
                     videoCapture
                 )
@@ -149,6 +169,40 @@ class MainActivity : AppCompatActivity() {
         camera?.cameraInfo?.zoomState?.observe(this) { state ->
             binding.zoomText.text = getString(R.string.zoom_format, state.zoomRatio)
         }
+    }
+
+    /**
+     * Tek lens modunda, cok lensli (logical) olmayan ve 1x'e karsilik gelen
+     * gercek fiziksel ana arka kamerayi secmeye calisir. Bu kamerada zoom
+     * tamamen dijitaldir, dolayisiyla lens gecisi hic olmaz. Cihaz boyle bir
+     * kamerayi uygulamalara acmiyorsa varsayilan arka kameraya donulur
+     * (zoom araligi yine 1x-8x ile sinirlanir).
+     */
+    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
+    private fun chooseCameraSelector(provider: ProcessCameraProvider): CameraSelector {
+        if (!singleLensMode) return CameraSelector.DEFAULT_BACK_CAMERA
+
+        val mainPhysical = provider.availableCameraInfos.firstOrNull { info ->
+            val c2 = Camera2CameraInfo.from(info)
+            val facing = c2.getCameraCharacteristic(CameraCharacteristics.LENS_FACING)
+            val capabilities = c2.getCameraCharacteristic(
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
+            )
+            val isLogical = capabilities?.contains(
+                CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA
+            ) == true
+            facing == CameraCharacteristics.LENS_FACING_BACK &&
+                !isLogical &&
+                info.intrinsicZoomRatio in 0.95f..1.05f
+        } ?: return CameraSelector.DEFAULT_BACK_CAMERA
+
+        val targetId = Camera2CameraInfo.from(mainPhysical).cameraId
+        return CameraSelector.Builder()
+            .addCameraFilter { infos ->
+                infos.filter { Camera2CameraInfo.from(it).cameraId == targetId }
+                    .ifEmpty { infos }
+            }
+            .build()
     }
 
     /**
@@ -176,8 +230,10 @@ class MainActivity : AppCompatActivity() {
      */
     private fun resolveZoomRange(): Pair<Float, Float>? {
         val state = camera?.cameraInfo?.zoomState?.value ?: return null
-        val start = min(TARGET_START_ZOOM, state.maxZoomRatio)
-        val end = max(TARGET_END_ZOOM, state.minZoomRatio)
+        val targetStart = if (singleLensMode) SINGLE_LENS_START_ZOOM else TARGET_START_ZOOM
+        val targetEnd = if (singleLensMode) SINGLE_LENS_END_ZOOM else TARGET_END_ZOOM
+        val start = min(targetStart, state.maxZoomRatio)
+        val end = max(targetEnd, state.minZoomRatio)
         return if (zoomOutMode) start to end else end to start
     }
 
@@ -301,6 +357,7 @@ class MainActivity : AppCompatActivity() {
             if (recording) android.view.View.VISIBLE else android.view.View.GONE
         binding.directionToggle.isEnabled = !recording
         binding.lockExposure.isEnabled = !recording
+        binding.singleLens.isEnabled = !recording
         for (i in 0 until binding.durationGroup.childCount) {
             binding.durationGroup.getChildAt(i).isEnabled = !recording
         }
@@ -316,6 +373,8 @@ class MainActivity : AppCompatActivity() {
         private const val FILENAME_FORMAT = "yyyyMMdd_HHmmss"
         private const val TARGET_START_ZOOM = 15f
         private const val TARGET_END_ZOOM = 0.5f
+        private const val SINGLE_LENS_START_ZOOM = 8f
+        private const val SINGLE_LENS_END_ZOOM = 1f
         private const val HOLD_MS = 700L
     }
 }

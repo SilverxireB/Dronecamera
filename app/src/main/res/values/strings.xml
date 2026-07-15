@@ -5,6 +5,9 @@
     <string name="stop_shot">DURDUR</string>
     <string name="mode_zoom_out">Mod: Uzaklaşma (15x → 0.5x)</string>
     <string name="mode_zoom_in">Mod: Yaklaşma (0.5x → 15x)</string>
+    <string name="mode_zoom_out_single">Mod: Uzaklaşma (8x → 1x)</string>
+    <string name="mode_zoom_in_single">Mod: Yaklaşma (1x → 8x)</string>
+    <string name="single_lens">Tek lens modu (8x → 1x, lens geçişi yok)</string>
     <string name="duration_10">10 sn</string>
     <string name="duration_15">15 sn</string>
     <string name="duration_20">20 sn</string>
