@@ -220,17 +220,6 @@
                 android:layout_gravity="center"
                 android:background="@drawable/shutter_idle"
                 android:contentDescription="@string/desc_shutter" />
-
-            <ImageView
-                android:id="@+id/btnFlip"
-                android:layout_width="46dp"
-                android:layout_height="46dp"
-                android:layout_gravity="center_vertical|end"
-                android:layout_marginEnd="36dp"
-                android:contentDescription="@string/desc_flip"
-                android:padding="11dp"
-                android:src="@drawable/ic_flip"
-                app:tint="@color/textPrimary" />
         </FrameLayout>
     </LinearLayout>
 

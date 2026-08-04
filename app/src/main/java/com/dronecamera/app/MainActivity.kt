@@ -33,8 +33,6 @@ import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -64,7 +62,6 @@ class MainActivity : AppCompatActivity() {
     private var provider: ProcessCameraProvider? = null
     private var camera: Camera? = null
     private var videoCapture: VideoCapture<Recorder>? = null
-    private var imageCapture: ImageCapture? = null
     private var activeRecording: Recording? = null
     private var sequencePlayer: ZoomSequencePlayer? = null
     private var countdownTimer: CountDownTimer? = null
@@ -83,11 +80,15 @@ class MainActivity : AppCompatActivity() {
     private var softZoomMax = 1f
     private var softZoomLevel = 1f
     private var zoomProcessor: ZoomSurfaceProcessor? = null
-    /** true: rampanin tamami yazilim kirpmasiyla yapilir (en akici). */
-    private var softwareRamp = true
     private var lastOpticalRequested = 1f
+    /**
+     * Yazilim zoom acikken optik zoom cekim boyunca bu sabit degerde tutulur;
+     * rampanin tamami kirpma ile yapilir. Deger onizlemede de gecerlidir, yani
+     * kayit basladiginda optik zoom hic degismez — kaydin ilk saniyesindeki
+     * yeniden odaklanma/bulaniklik boylece ortadan kalkar.
+     */
+    private var rampOpticalBasis = 0f
     private var showGrid = false
-    private var useFrontCamera = false
 
     private var isShotRunning = false
     private var isCountingDown = false
@@ -148,7 +149,6 @@ class MainActivity : AppCompatActivity() {
         lensThreshold = prefs.getFloat("lensThreshold", lensThreshold)
         lockExposure = prefs.getBoolean("lockExposure", lockExposure)
         softZoomMax = prefs.getFloat("softZoomMax", softZoomMax)
-        softwareRamp = prefs.getBoolean("softwareRamp", softwareRamp)
         stabilization = prefs.getBoolean("stabilization", stabilization)
         showGrid = prefs.getBoolean("showGrid", showGrid)
     }
@@ -164,7 +164,6 @@ class MainActivity : AppCompatActivity() {
             .putFloat("lensThreshold", lensThreshold)
             .putBoolean("lockExposure", lockExposure)
             .putFloat("softZoomMax", softZoomMax)
-            .putBoolean("softwareRamp", softwareRamp)
             .putBoolean("stabilization", stabilization)
             .putBoolean("showGrid", showGrid)
             .apply()
@@ -421,13 +420,19 @@ class MainActivity : AppCompatActivity() {
         binding.zoomText.text = getString(R.string.zoom_format, effective)
     }
 
+    /** Yazilim kirpmasi mevcut mu (efekt hatti bagli mi). */
+    private fun useSoftwareRamp(): Boolean = zoomProcessor != null
+
     /** Istenen efektif zoom'u optik + yazilimsal kirpma olarak ikiye boler. */
     private fun applyEffectiveZoom(effective: Float) {
-        val ceiling = currentOpticalCeiling()
-        val optical = min(effective, ceiling)
+        val optical = if (useSoftwareRamp() && rampOpticalBasis > 0f) {
+            rampOpticalBasis
+        } else {
+            min(effective, currentOpticalCeiling())
+        }
         lastOpticalRequested = optical
         camera?.cameraControl?.setZoomRatio(optical)
-        softZoomLevel = (effective / optical).coerceAtLeast(1f)
+        softZoomLevel = (effective / optical).coerceIn(1f, MAX_SOFT_CROP)
         zoomProcessor?.zoom = softZoomLevel
         // Rozet dogrudan burada guncellenir: optik deger ayni kalip yalnizca
         // yazilim kirpmasi degistiginde zoom gozlemcisi tetiklenmiyor.
@@ -460,15 +465,6 @@ class MainActivity : AppCompatActivity() {
                 10 to getString(R.string.countdown_10)
             ),
             { countdownSec }, { countdownSec = it }
-        )
-
-        addChipRow(
-            content, R.string.label_engine,
-            listOf(
-                true to getString(R.string.engine_software),
-                false to getString(R.string.engine_optical)
-            ),
-            { softwareRamp }, { softwareRamp = it }
         )
 
         addChipRow(
@@ -564,12 +560,6 @@ class MainActivity : AppCompatActivity() {
             toggleSettings(false)
         }
         binding.settingsScrim.setOnClickListener { toggleSettings(false) }
-        binding.btnFlip.setOnClickListener {
-            if (isBusy()) return@setOnClickListener
-            haptic(it)
-            useFrontCamera = !useFrontCamera
-            bindCamera()
-        }
         applyModeToUi()
     }
 
@@ -586,16 +576,14 @@ class MainActivity : AppCompatActivity() {
     /** Moda gore hangi kontrollerin gorunecegini ayarlar. */
     private fun applyModeToUi() {
         setVisible(binding.lensScroll, mode.allowsLensRange)
-        setVisible(binding.btnFlip, mode == CameraMode.PHOTO || mode == CameraMode.VIDEO)
         binding.gridGroup.visibility = gridVisibility()
 
         when (mode) {
             CameraMode.VERTIGO -> showGuide(R.string.vertigo_guide)
             CameraMode.DRONIE -> showGuide(R.string.dronie_guide)
-            CameraMode.DRONE, CameraMode.BOOMERANG, CameraMode.STEP ->
+            else ->
                 if (lensRange == LensRange.FULL) showGuide(R.string.full_range_warning)
                 else binding.guideText.visibility = View.GONE
-            else -> binding.guideText.visibility = View.GONE
         }
     }
 
@@ -636,33 +624,22 @@ class MainActivity : AppCompatActivity() {
             val preview = Preview.Builder().build()
                 .also { it.setSurfaceProvider(binding.previewView.surfaceProvider) }
 
-            val group = UseCaseGroup.Builder().addUseCase(preview)
-            if (mode == CameraMode.PHOTO) {
-                val capture = ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                    .build()
-                imageCapture = capture
-                videoCapture = null
-                group.addUseCase(capture)
+            // Yazilim zoom aciksa 4K kaydediyoruz: 1080p'ye kirparken
+            // 2 kata kadar detay kaybi olmaz. Aksi halde FHD daha akici.
+            val qualities = if (withSoftZoom) {
+                listOf(Quality.UHD, Quality.FHD, Quality.HD)
             } else {
-                // Yazilim zoom aciksa 4K kaydediyoruz: 1080p'ye kirparken
-                // 2 kata kadar detay kaybi olmaz. Aksi halde FHD daha akici.
-                val qualities = if (withSoftZoom) {
-                    listOf(Quality.UHD, Quality.FHD, Quality.HD)
-                } else {
-                    listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
-                }
-                val recorder = Recorder.Builder()
-                    .setQualitySelector(QualitySelector.fromOrderedList(qualities))
-                    .build()
-                val capture = VideoCapture.withOutput(recorder)
-                imageCapture = null
-                videoCapture = capture
-                group.addUseCase(capture)
+                listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
             }
+            val recorder = Recorder.Builder()
+                .setQualitySelector(QualitySelector.fromOrderedList(qualities))
+                .build()
+            val capture = VideoCapture.withOutput(recorder)
+            videoCapture = capture
 
-            // Yazilim zoom yalnizca video modlarinda anlamli.
-            if (withSoftZoom && mode != CameraMode.PHOTO) {
+            val group = UseCaseGroup.Builder().addUseCase(preview).addUseCase(capture)
+
+            if (withSoftZoom) {
                 val processor = ZoomSurfaceProcessor()
                 zoomProcessor = processor
                 group.addEffect(
@@ -739,9 +716,7 @@ class MainActivity : AppCompatActivity() {
      */
     @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
     private fun chooseCameraSelector(provider: ProcessCameraProvider): CameraSelector {
-        val wantsFront = mode.usesFrontCamera ||
-            (useFrontCamera && (mode == CameraMode.PHOTO || mode == CameraMode.VIDEO))
-        if (wantsFront) return CameraSelector.DEFAULT_FRONT_CAMERA
+        if (mode.usesFrontCamera) return CameraSelector.DEFAULT_FRONT_CAMERA
         if (!lensRange.isSingleLens || !mode.allowsLensRange) {
             return CameraSelector.DEFAULT_BACK_CAMERA
         }
@@ -789,6 +764,7 @@ class MainActivity : AppCompatActivity() {
     private fun applyStartZoom() {
         if (isBusy()) return
         val range = resolveZoomRange() ?: return
+        rampOpticalBasis = min(min(range.first, range.second), currentOpticalCeiling())
         applyEffectiveZoom(range.first)
         applyModeToUi()
     }
@@ -866,7 +842,6 @@ class MainActivity : AppCompatActivity() {
     private fun curveInterpolator() = when (curve) {
         ZoomCurve.CINEMATIC -> AccelerateDecelerateInterpolator()
         ZoomCurve.LINEAR -> LinearInterpolator()
-        ZoomCurve.AGGRESSIVE -> DecelerateInterpolator(2f)
     }
 
     private fun buildSequence(startZoom: Float, endZoom: Float): List<ZoomSegment> {
@@ -927,14 +902,17 @@ class MainActivity : AppCompatActivity() {
         }
         if (settingsOpen) toggleSettings(false)
 
-        when (mode) {
-            CameraMode.PHOTO -> withCountdown { takePhoto() }
-            CameraMode.VIDEO -> withCountdown { startRecording(null) }
-            else -> {
-                val range = resolveZoomRange() ?: return
-                applyEffectiveZoom(range.first)
-                withCountdown { startRecording(buildSequence(range.first, range.second)) }
-            }
+        val range = resolveZoomRange() ?: return
+        rampOpticalBasis = min(min(range.first, range.second), currentOpticalCeiling())
+        applyEffectiveZoom(range.first)
+        val sequence = buildSequence(range.first, range.second)
+
+        withCountdown {
+            // Odak/pozlama kilidi kayit BASLAMADAN once verilir ve oturmasi
+            // beklenir; aksi halde otomatik odagin taramasi videonun ilk
+            // saniyesine bulaniklik olarak yansiyor.
+            if (lockExposure) applyCaptureOptions(locked = true)
+            binding.previewView.postDelayed({ startRecording(sequence) }, FOCUS_SETTLE_MS)
         }
     }
 
@@ -968,40 +946,7 @@ class MainActivity : AppCompatActivity() {
     private fun timestampName(prefix: String): String =
         prefix + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())
 
-    private fun takePhoto() {
-        val imageCapture = this.imageCapture ?: return
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, timestampName("FOTO_"))
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DroneCamera")
-            }
-        }
-        val output = ImageCapture.OutputFileOptions.Builder(
-            contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
-        ).build()
-
-        imageCapture.takePicture(
-            output,
-            ContextCompat.getMainExecutor(this),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(results: ImageCapture.OutputFileResults) {
-                    Toast.makeText(this@MainActivity, R.string.photo_saved, Toast.LENGTH_SHORT)
-                        .show()
-                }
-
-                override fun onError(exception: ImageCaptureException) {
-                    Toast.makeText(
-                        this@MainActivity,
-                        getString(R.string.photo_error, exception.message),
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        )
-    }
-
-    private fun startRecording(sequence: List<ZoomSegment>?) {
+    private fun startRecording(sequence: List<ZoomSegment>) {
         val videoCapture = this.videoCapture ?: return
 
         val values = ContentValues().apply {
@@ -1024,8 +969,7 @@ class MainActivity : AppCompatActivity() {
                 is VideoRecordEvent.Start -> {
                     isShotRunning = true
                     setRecordingUi(true)
-                    if (lockExposure) applyCaptureOptions(locked = true)
-                    if (sequence != null) startZoomSequence(sequence)
+                    startZoomSequence(sequence)
                 }
                 is VideoRecordEvent.Status -> {
                     val sec = event.recordingStats.recordedDurationNanos / 1_000_000_000
@@ -1059,23 +1003,12 @@ class MainActivity : AppCompatActivity() {
      */
     private fun startZoomSequence(sequence: List<ZoomSegment>) {
         val processor = zoomProcessor
-        val useSoftwareRamp = softwareRamp && processor != null
+        val softwareRamp = processor != null && rampOpticalBasis > 0f
         val startedAt = SystemClock.elapsedRealtime()
+        val basis = rampOpticalBasis
 
-        val lowest = sequence.minOf { segment ->
-            when (segment) {
-                is ZoomSegment.Hold -> segment.zoom
-                is ZoomSegment.Ramp -> min(segment.from, segment.to)
-            }
-        }
-        val fixedOptical = min(lowest, currentOpticalCeiling())
-        if (useSoftwareRamp) {
-            lastOpticalRequested = fixedOptical
-            camera?.cameraControl?.setZoomRatio(fixedOptical)
-        }
-
+        // Optik zoom zaten onizlemede dogru degerde; burada DEGISTIRILMEZ.
         processor?.zoomProvider = {
-            val basis = if (useSoftwareRamp) fixedOptical else lastOpticalRequested
             val target = sequence.zoomAt(SystemClock.elapsedRealtime() - startedAt)
             (target / basis).coerceIn(1f, MAX_SOFT_CROP)
         }
@@ -1084,7 +1017,7 @@ class MainActivity : AppCompatActivity() {
             segments = sequence,
             setZoom = { effective ->
                 updateZoomBadge(effective)
-                if (!useSoftwareRamp) applyEffectiveZoom(effective)
+                if (!softwareRamp) applyEffectiveZoom(effective)
             },
             onProgress = { fraction, _ ->
                 binding.progressBar.progress = (fraction * 100).toInt()
@@ -1109,11 +1042,10 @@ class MainActivity : AppCompatActivity() {
         setVisible(binding.recTimer, recording)
         binding.recTimer.text = getString(R.string.timer_zero)
         binding.progressBar.progress = 0
-        setVisible(binding.progressBar, recording && mode.isZoomMode)
+        setVisible(binding.progressBar, recording)
         binding.modeScroll.alpha = if (recording) 0.35f else 1f
         binding.lensScroll.alpha = if (recording) 0.35f else 1f
         binding.btnSettings.alpha = if (recording) 0.35f else 1f
-        binding.btnFlip.alpha = if (recording) 0.35f else 1f
         if (recording) binding.guideText.visibility = View.GONE else applyModeToUi()
     }
 
@@ -1129,5 +1061,8 @@ class MainActivity : AppCompatActivity() {
     private companion object {
         /** Kirpma ile ulasilabilecek azami buyutme (asiri yumusamayi onler). */
         const val MAX_SOFT_CROP = 12f
+
+        /** Odak/pozlama kilidinin oturmasi icin kayit oncesi beklenen sure. */
+        const val FOCUS_SETTLE_MS = 600L
     }
 }

@@ -3,8 +3,6 @@
     <string name="app_name">Drone Kamera</string>
 
     <!-- Modlar -->
-    <string name="mode_photo">FOTO</string>
-    <string name="mode_video">VİDEO</string>
     <string name="mode_drone">DRONE</string>
     <string name="mode_boomerang">BUMERANG</string>
     <string name="mode_step">KADEMELİ</string>
@@ -24,9 +22,6 @@
     <string name="label_direction">YÖN</string>
     <string name="label_curve">HIZ EĞRİSİ</string>
     <string name="label_countdown">GERİ SAYIM</string>
-    <string name="label_engine">ZOOM MOTORU</string>
-    <string name="engine_software">Akıcı</string>
-    <string name="engine_optical">Net</string>
     <string name="label_soft_zoom">YAZILIM ZOOM</string>
     <string name="soft_off">Kapalı</string>
     <string name="soft_fmt">+%sx</string>
@@ -39,7 +34,6 @@
     <string name="dir_in">Yaklaşma</string>
     <string name="curve_cinematic">Sinematik</string>
     <string name="curve_linear">Sabit</string>
-    <string name="curve_aggressive">Sert</string>
     <string name="countdown_off">Kapalı</string>
     <string name="countdown_3">3 sn</string>
     <string name="countdown_10">10 sn</string>
@@ -61,16 +55,13 @@
     <string name="dronie_guide">Telefonu yüzüne yakın tut, çekim uzaklaşarak açılır</string>
 
     <!-- Mesajlar -->
-    <string name="photo_saved">Fotoğraf kaydedildi: Resimler/DroneCamera</string>
     <string name="video_saved">Video kaydedildi: Filmler/DroneCamera</string>
     <string name="record_error">Kayıt hatası: %d</string>
-    <string name="photo_error">Fotoğraf hatası: %s</string>
     <string name="camera_error">Kamera açılamadı: %s</string>
     <string name="camera_permission_needed">Uygulamanın çalışması için kamera izni gerekli.</string>
 
     <!-- Erisilebilirlik -->
     <string name="desc_settings">Ayarlar</string>
     <string name="desc_close">Kapat</string>
-    <string name="desc_flip">Kamera değiştir</string>
     <string name="desc_shutter">Deklanşör</string>
 </resources>
