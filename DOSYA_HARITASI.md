@@ -8,14 +8,17 @@ Her push'ta güncelle. Amaç: dosyaları körlemesine okumadan doğru yere gitme
 Bölge başlıklarıyla gezin (`// ---- ...` yorum satırları):
 - Alanlar (~55-95): `mode, lensRange, durationSec, zoomOut, curve, countdownSec,
   lensThreshold, lockExposure, stabilization, showGrid, useFrontCamera` + `refreshers`
-- `Ayar saklama`: `loadPrefs()/savePrefs()` — SharedPreferences "drone_camera"
+- `Ayar saklama`: `loadPrefs()/savePrefs()` — SharedPreferences "drone_camera";
+  `savePreset/loadPreset/hasPreset` (3 şablon slotu, "p<slot>_*" anahtarları)
 - `UI yardimcilari`: `dp/isBusy/haptic/setVisible/makeChip/styleChip/refreshAll`,
   jenerik `addChipRow()`, `addSwitchRow()`
 - `Menu kurulumu`: `buildModeCarousel()` (nokta göstergeli mod şeridi),
   `buildLensSegments()` + `updateLensLabels()/zoomBoundsFor()/fmtZoom()` (çiplerde
   gerçek aralık yazar: "TELE 4–15x"), `buildSettingsSheet()` (tüm ayar satırları),
   `addThresholdRow()` (canlı kalibrasyon SeekBar), `setupControls()`,
-  `toggleSettings()`, `applyModeToUi()`
+  `addPresetRow()`, `toggleSettings()`, `applyModeToUi()`, `sizeSettingsSheet()`
+  (yatayda panel yüksekliğini ekrana uydurur), `runRehearsal()` (PROVA: kayıtsız
+  hızlı rampa önizlemesi), `updateGalleryThumb()/openLastVideo()`
 - `Kamera`: `startCamera()`, `bindCamera()` (sabitleme için 3 kademeli fallback:
   önizleme→video→kapalı), `chooseCameraSelector()`, `observeZoom()`,
   `applyStartZoom()`, `applyCaptureOptions(locked)` (AE/AWB + odak kilidi, EIS)

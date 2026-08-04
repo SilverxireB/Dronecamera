@@ -107,6 +107,19 @@
             android:text="@string/zoom_placeholder"
             android:textColor="@color/textPrimary"
             android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/btnRehearse"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:background="@drawable/chip_bg"
+            android:letterSpacing="0.08"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="4dp"
+            android:text="@string/rehearse"
+            android:textColor="@color/textSecondary"
+            android:textSize="11sp" />
     </LinearLayout>
 
     <TextView
@@ -220,6 +233,17 @@
                 android:layout_gravity="center"
                 android:background="@drawable/shutter_idle"
                 android:contentDescription="@string/desc_shutter" />
+
+            <ImageView
+                android:id="@+id/btnGallery"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:layout_gravity="center_vertical|end"
+                android:layout_marginEnd="36dp"
+                android:background="@drawable/thumb_bg"
+                android:contentDescription="@string/desc_gallery"
+                android:scaleType="centerCrop"
+                android:visibility="gone" />
         </FrameLayout>
     </LinearLayout>
 
@@ -282,6 +306,7 @@
         </LinearLayout>
 
         <ScrollView
+            android:id="@+id/settingsScroll"
             android:layout_width="match_parent"
             android:layout_height="360dp"
             android:scrollbars="none">

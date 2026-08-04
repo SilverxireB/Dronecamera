@@ -2,9 +2,11 @@ package com.dronecamera.app
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.Intent
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
@@ -12,8 +14,12 @@ import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.SystemClock
+import android.net.Uri
 import android.provider.MediaStore
+import android.util.Range
+import android.util.Size
 import android.view.HapticFeedbackConstants
+import android.view.Surface
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -89,8 +95,13 @@ class MainActivity : AppCompatActivity() {
      */
     private var rampOpticalBasis = 0f
     private var showGrid = false
+    private var recordUhd = true
+    private var targetFps = 30
+    private var muteAudio = false
 
+    private var lastVideoUri: Uri? = null
     private var isShotRunning = false
+    private var isRehearsing = false
     private var isCountingDown = false
     private var settingsOpen = false
     private var pendingStartZoom = true
@@ -151,6 +162,9 @@ class MainActivity : AppCompatActivity() {
         softZoomMax = prefs.getFloat("softZoomMax", softZoomMax)
         stabilization = prefs.getBoolean("stabilization", stabilization)
         showGrid = prefs.getBoolean("showGrid", showGrid)
+        recordUhd = prefs.getBoolean("recordUhd", recordUhd)
+        targetFps = prefs.getInt("targetFps", targetFps)
+        muteAudio = prefs.getBoolean("muteAudio", muteAudio)
     }
 
     private fun savePrefs() {
@@ -166,14 +180,58 @@ class MainActivity : AppCompatActivity() {
             .putFloat("softZoomMax", softZoomMax)
             .putBoolean("stabilization", stabilization)
             .putBoolean("showGrid", showGrid)
+            .putBoolean("recordUhd", recordUhd)
+            .putInt("targetFps", targetFps)
+            .putBoolean("muteAudio", muteAudio)
             .apply()
+    }
+
+    // ---------------------------------------------------------------- Sablonlar
+
+    /** Mevcut cekim ayarlarini bir slota kaydeder. */
+    private fun savePreset(slot: Int) {
+        prefs.edit()
+            .putBoolean("p${slot}_set", true)
+            .putString("p${slot}_mode", mode.name)
+            .putString("p${slot}_lens", lensRange.name)
+            .putString("p${slot}_curve", curve.name)
+            .putInt("p${slot}_dur", durationSec)
+            .putBoolean("p${slot}_out", zoomOut)
+            .putInt("p${slot}_cd", countdownSec)
+            .putFloat("p${slot}_soft", softZoomMax)
+            .putBoolean("p${slot}_uhd", recordUhd)
+            .putInt("p${slot}_fps", targetFps)
+            .apply()
+    }
+
+    private fun hasPreset(slot: Int) = prefs.getBoolean("p${slot}_set", false)
+
+    private fun loadPreset(slot: Int): Boolean {
+        if (!hasPreset(slot)) return false
+        mode = runCatching { CameraMode.valueOf(prefs.getString("p${slot}_mode", mode.name)!!) }
+            .getOrDefault(mode)
+        lensRange = runCatching { LensRange.valueOf(prefs.getString("p${slot}_lens", lensRange.name)!!) }
+            .getOrDefault(lensRange)
+        curve = runCatching { ZoomCurve.valueOf(prefs.getString("p${slot}_curve", curve.name)!!) }
+            .getOrDefault(curve)
+        durationSec = prefs.getInt("p${slot}_dur", durationSec)
+        zoomOut = prefs.getBoolean("p${slot}_out", zoomOut)
+        countdownSec = prefs.getInt("p${slot}_cd", countdownSec)
+        softZoomMax = prefs.getFloat("p${slot}_soft", softZoomMax)
+        recordUhd = prefs.getBoolean("p${slot}_uhd", recordUhd)
+        targetFps = prefs.getInt("p${slot}_fps", targetFps)
+        savePrefs()
+        refreshAll()
+        applyModeToUi()
+        bindCamera()
+        return true
     }
 
     // ---------------------------------------------------------------- UI yardimcilari
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    private fun isBusy() = isShotRunning || isCountingDown
+    private fun isBusy() = isShotRunning || isCountingDown || isRehearsing
 
     private fun haptic(view: View) =
         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -492,7 +550,72 @@ class MainActivity : AppCompatActivity() {
             content, R.string.opt_grid_title, R.string.opt_grid_summary,
             { showGrid }, { showGrid = it; binding.gridGroup.visibility = gridVisibility() }
         )
+        addSwitchRow(
+            content, R.string.opt_mute_title, R.string.opt_mute_summary,
+            { muteAudio }, { muteAudio = it }
+        )
 
+        addChipRow(
+            content, R.string.label_quality,
+            listOf(
+                true to getString(R.string.quality_uhd),
+                false to getString(R.string.quality_fhd)
+            ),
+            { recordUhd }, { recordUhd = it; bindCamera() }
+        )
+        addChipRow(
+            content, R.string.label_fps,
+            listOf(
+                30 to getString(R.string.fps_30),
+                60 to getString(R.string.fps_60)
+            ),
+            { targetFps }, { targetFps = it; applyCaptureOptions(locked = false) }
+        )
+
+        addPresetRow(content)
+    }
+
+    /** Cekim ayarlarinin tamamini saklayan uc sablon slotu. */
+    private fun addPresetRow(container: LinearLayout) {
+        container.addView(TextView(this).apply {
+            text = getString(R.string.label_preset)
+            textSize = 11f
+            letterSpacing = 0.12f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textTertiary))
+            setPadding(dp(4), dp(18), 0, dp(8))
+        })
+
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val chips = (1..3).map { slot ->
+            val chip = makeChip(getString(R.string.preset_fmt, slot))
+            chip.setOnClickListener {
+                if (isBusy()) return@setOnClickListener
+                haptic(chip)
+                val message = if (loadPreset(slot)) R.string.preset_loaded else R.string.preset_empty
+                Toast.makeText(this, getString(message, slot), Toast.LENGTH_SHORT).show()
+            }
+            chip.setOnLongClickListener {
+                if (!isBusy()) {
+                    haptic(chip)
+                    savePreset(slot)
+                    refreshAll()
+                    Toast.makeText(
+                        this, getString(R.string.preset_saved, slot), Toast.LENGTH_SHORT
+                    ).show()
+                }
+                true
+            }
+            row.addView(chip)
+            slot to chip
+        }
+        container.addView(row)
+        container.addView(TextView(this).apply {
+            text = getString(R.string.preset_hint)
+            textSize = 11f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textTertiary))
+            setPadding(dp(4), dp(6), 0, 0)
+        })
+        refreshers += { chips.forEach { (slot, chip) -> styleChip(chip, hasPreset(slot)) } }
     }
 
     /**
@@ -560,6 +683,19 @@ class MainActivity : AppCompatActivity() {
             toggleSettings(false)
         }
         binding.settingsScrim.setOnClickListener { toggleSettings(false) }
+        binding.btnRehearse.setOnClickListener {
+            haptic(it)
+            runRehearsal()
+        }
+        binding.btnGallery.setOnClickListener {
+            haptic(it)
+            openLastVideo()
+        }
+        // Cekim sirasinda onizlemeye dokunmak (odaklama/parmakla zoom) rampayi
+        // bozar; bu yuzden kayit ve prova boyunca dokunuslar yutulur.
+        binding.previewView.setOnTouchListener { _, _ -> isBusy() }
+
+        sizeSettingsSheet()
         applyModeToUi()
     }
 
@@ -572,6 +708,108 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun gridVisibility() = if (showGrid) View.VISIBLE else View.GONE
+
+    private fun currentRotation(): Int = binding.root.display?.rotation ?: Surface.ROTATION_0
+
+    /** Ayar paneli yatayda ekrani doldurmasin diye yuksekligi ekrana uydurulur. */
+    private fun sizeSettingsSheet() {
+        val maxHeight = (resources.displayMetrics.heightPixels * 0.45f).toInt()
+        binding.settingsScroll.layoutParams = binding.settingsScroll.layoutParams.apply {
+            height = min(dp(360), maxHeight)
+        }
+        binding.settingsScroll.requestLayout()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        sizeSettingsSheet()
+        videoCapture?.targetRotation = currentRotation()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Uygulama one dondugunde kamera yeniden baglanabiliyor; optik zoom,
+        // kirpma ve rozet birlikte yeniden kurulsun.
+        if (!isBusy()) {
+            pendingStartZoom = true
+            binding.previewView.postDelayed({ if (!isBusy()) applyStartZoom() }, 400)
+        }
+    }
+
+    /** Son cekilen videoyu galeride acar. */
+    private fun openLastVideo() {
+        val uri = lastVideoUri ?: return
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, "video/mp4")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        runCatching { startActivity(intent) }.onFailure {
+            Toast.makeText(this, R.string.no_video_app, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun updateGalleryThumb() {
+        val uri = lastVideoUri
+        if (uri == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            setVisible(binding.btnGallery, false)
+            return
+        }
+        Thread {
+            val size = Size(dp(96), dp(96))
+            val thumb = runCatching { contentResolver.loadThumbnail(uri, size, null) }.getOrNull()
+            runOnUiThread {
+                if (thumb != null && !isFinishing) {
+                    binding.btnGallery.setImageBitmap(thumb)
+                    binding.btnGallery.clipToOutline = true
+                    setVisible(binding.btnGallery, true)
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * Prova: kayit yapmadan rampanin tamamini hizlica oynatir. Cekimin nereden
+     * nereye acilacagini onceden gormeyi saglar, sonra baslangic kadrajina doner.
+     */
+    private fun runRehearsal() {
+        if (isBusy()) return
+        val range = resolveZoomRange() ?: return
+        rampOpticalBasis = min(min(range.first, range.second), currentOpticalCeiling())
+        applyEffectiveZoom(range.first)
+
+        val rehearsal = listOf(
+            ZoomSegment.Ramp(range.first, range.second, REHEARSAL_MS, curveInterpolator())
+        )
+        isRehearsing = true
+        binding.btnRehearse.text = getString(R.string.rehearse_running)
+        setVisible(binding.progressBar, true)
+
+        val startedAt = SystemClock.elapsedRealtime()
+        val basis = rampOpticalBasis
+        val softwareRamp = zoomProcessor != null && basis > 0f
+        zoomProcessor?.zoomProvider = {
+            val target = rehearsal.zoomAt(SystemClock.elapsedRealtime() - startedAt)
+            (target / basis).coerceIn(1f, MAX_SOFT_CROP)
+        }
+
+        sequencePlayer = ZoomSequencePlayer(
+            segments = rehearsal,
+            setZoom = { effective ->
+                updateZoomBadge(effective)
+                if (!softwareRamp) applyEffectiveZoom(effective)
+            },
+            onProgress = { fraction, _ ->
+                binding.progressBar.progress = (fraction * 100).toInt()
+            },
+            onEnd = {
+                isRehearsing = false
+                zoomProcessor?.zoomProvider = null
+                sequencePlayer = null
+                binding.btnRehearse.text = getString(R.string.rehearse)
+                setVisible(binding.progressBar, false)
+                applyStartZoom()
+            }
+        ).also { it.start() }
+    }
 
     /** Moda gore hangi kontrollerin gorunecegini ayarlar. */
     private fun applyModeToUi() {
@@ -624,17 +862,18 @@ class MainActivity : AppCompatActivity() {
             val preview = Preview.Builder().build()
                 .also { it.setSurfaceProvider(binding.previewView.surfaceProvider) }
 
-            // Yazilim zoom aciksa 4K kaydediyoruz: 1080p'ye kirparken
-            // 2 kata kadar detay kaybi olmaz. Aksi halde FHD daha akici.
-            val qualities = if (withSoftZoom) {
+            // 4K, yazilim kirpmasi icin pay birakir: 1080p'ye kirparken 2 kata
+            // kadar detay kaybi olmaz.
+            val qualities = if (recordUhd) {
                 listOf(Quality.UHD, Quality.FHD, Quality.HD)
             } else {
-                listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
+                listOf(Quality.FHD, Quality.HD)
             }
             val recorder = Recorder.Builder()
                 .setQualitySelector(QualitySelector.fromOrderedList(qualities))
                 .build()
             val capture = VideoCapture.withOutput(recorder)
+            capture.targetRotation = currentRotation()
             videoCapture = capture
 
             val group = UseCaseGroup.Builder().addUseCase(preview).addUseCase(capture)
@@ -784,6 +1023,9 @@ class MainActivity : AppCompatActivity() {
             )
             .setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, locked)
             .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, locked)
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(targetFps, targetFps)
+            )
             .build()
         Camera2CameraControl.from(cameraControl).setCaptureRequestOptions(options)
 
@@ -962,7 +1204,9 @@ class MainActivity : AppCompatActivity() {
 
         val pending = videoCapture.output
             .prepareRecording(this, outputOptions)
-            .apply { if (hasPermission(Manifest.permission.RECORD_AUDIO)) withAudioEnabled() }
+            .apply {
+                if (!muteAudio && hasPermission(Manifest.permission.RECORD_AUDIO)) withAudioEnabled()
+            }
 
         activeRecording = pending.start(ContextCompat.getMainExecutor(this)) { event ->
             when (event) {
@@ -985,6 +1229,8 @@ class MainActivity : AppCompatActivity() {
                             this, getString(R.string.record_error, event.error), Toast.LENGTH_LONG
                         ).show()
                     } else {
+                        lastVideoUri = event.outputResults.outputUri
+                        updateGalleryThumb()
                         Toast.makeText(this, R.string.video_saved, Toast.LENGTH_LONG).show()
                     }
                 }
@@ -1046,6 +1292,8 @@ class MainActivity : AppCompatActivity() {
         binding.modeScroll.alpha = if (recording) 0.35f else 1f
         binding.lensScroll.alpha = if (recording) 0.35f else 1f
         binding.btnSettings.alpha = if (recording) 0.35f else 1f
+        binding.btnRehearse.alpha = if (recording) 0.35f else 1f
+        binding.btnGallery.alpha = if (recording) 0.35f else 1f
         if (recording) binding.guideText.visibility = View.GONE else applyModeToUi()
     }
 
@@ -1064,5 +1312,8 @@ class MainActivity : AppCompatActivity() {
 
         /** Odak/pozlama kilidinin oturmasi icin kayit oncesi beklenen sure. */
         const val FOCUS_SETTLE_MS = 600L
+
+        /** Prova rampasinin suresi. */
+        const val REHEARSAL_MS = 2000L
     }
 }
