@@ -42,8 +42,11 @@ import androidx.camera.video.QualitySelector
 import androidx.camera.video.Recorder
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
+import androidx.camera.core.ZoomState
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.Observer
 import com.dronecamera.app.databinding.ActivityMainBinding
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -80,6 +83,8 @@ class MainActivity : AppCompatActivity() {
     private var isShotRunning = false
     private var isCountingDown = false
     private var settingsOpen = false
+    private var pendingStartZoom = true
+    private var observedZoom: LiveData<ZoomState>? = null
 
     /** Secili durumu yeniden boyayan fonksiyonlar (cip gruplari). */
     private val refreshers = mutableListOf<() -> Unit>()
@@ -422,6 +427,22 @@ class MainActivity : AppCompatActivity() {
             content, R.string.opt_grid_title, R.string.opt_grid_summary,
             { showGrid }, { showGrid = it; binding.gridGroup.visibility = gridVisibility() }
         )
+
+        // Cihazin uygulamalara actigi kamera ve zoom sinirlarini gosteren teshis.
+        content.addView(TextView(this).apply {
+            text = getString(R.string.label_diagnostics)
+            textSize = 11f
+            letterSpacing = 0.12f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textTertiary))
+            setPadding(dp(4), dp(20), 0, dp(6))
+        })
+        val diag = TextView(this).apply {
+            textSize = 11f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textSecondary))
+            setPadding(dp(4), 0, 0, dp(4))
+        }
+        content.addView(diag)
+        refreshers += { diag.text = cameraDiagnostics() }
     }
 
     /**
@@ -498,7 +519,7 @@ class MainActivity : AppCompatActivity() {
         settingsOpen = open
         setVisible(binding.settingsSheet, open)
         setVisible(binding.settingsScrim, open)
-        if (!open) applyStartZoom()
+        if (open) refreshAll() else applyStartZoom()
     }
 
     private fun gridVisibility() = if (showGrid) View.VISIBLE else View.GONE
@@ -545,6 +566,7 @@ class MainActivity : AppCompatActivity() {
     private fun bindCamera() {
         val provider = this.provider ?: return
         val selector = chooseCameraSelector(provider)
+        pendingStartZoom = true
 
         try {
             provider.unbindAll()
@@ -644,10 +666,53 @@ class MainActivity : AppCompatActivity() {
             .build()
     }
 
+    private val zoomObserver = Observer<ZoomState> { state ->
+        binding.zoomText.text = getString(R.string.zoom_format, state.zoomRatio)
+        updateLensLabels()
+        // Zoom durumu baglanmadan hemen sonra hazir olmayabiliyor; baslangic
+        // zoom'unu ilk gecerli deger gelince uygula.
+        if (pendingStartZoom) {
+            pendingStartZoom = false
+            applyStartZoom()
+        }
+    }
+
     private fun observeZoom() {
-        camera?.cameraInfo?.zoomState?.observe(this) { state ->
-            binding.zoomText.text = getString(R.string.zoom_format, state.zoomRatio)
-            updateLensLabels()
+        observedZoom?.removeObserver(zoomObserver)
+        val live = camera?.cameraInfo?.zoomState ?: return
+        observedZoom = live
+        live.observe(this, zoomObserver)
+    }
+
+    /**
+     * Cihazin uygulamalara hangi kameralari ve zoom araliklarini actigini
+     * gosterir. Honor kendi uygulamasinda 15x'e cikarken CameraX'e daha dusuk
+     * bir tavan bildirebiliyor; bu satir farki gormemizi saglar.
+     */
+    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
+    private fun cameraDiagnostics(): String {
+        val provider = this.provider ?: return "…"
+        return provider.availableCameraInfos.joinToString("\n") { info ->
+            val c2 = Camera2CameraInfo.from(info)
+            val facing = when (c2.getCameraCharacteristic(CameraCharacteristics.LENS_FACING)) {
+                CameraCharacteristics.LENS_FACING_BACK -> "arka"
+                CameraCharacteristics.LENS_FACING_FRONT -> "ön"
+                else -> "?"
+            }
+            val zoom = info.zoomState.value
+            val ratioRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                runCatching {
+                    c2.getCameraCharacteristic(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                }.getOrNull()
+            } else null
+            val digital = runCatching {
+                c2.getCameraCharacteristic(
+                    CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM
+                )
+            }.getOrNull()
+            "#${c2.cameraId} $facing · temel ${fmtZoom(info.intrinsicZoomRatio)}x · " +
+                "CameraX ${fmtZoom(zoom?.minZoomRatio ?: 0f)}-${fmtZoom(zoom?.maxZoomRatio ?: 0f)}x · " +
+                "HAL ${ratioRange?.lower ?: "-"}-${ratioRange?.upper ?: "-"} · dij ${digital ?: "-"}"
         }
     }
 

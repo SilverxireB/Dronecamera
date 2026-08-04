@@ -40,6 +40,7 @@
     <string name="opt_lock_summary">Çekim boyunca parlaklık, renk ve odak sabit kalır</string>
     <string name="opt_stab_title">Sabitleme</string>
     <string name="opt_stab_summary">Titremeyi azaltır, kadrajı bir miktar daraltır</string>
+    <string name="label_diagnostics">KAMERA BİLGİSİ</string>
     <string name="opt_grid_title">Izgara</string>
     <string name="opt_grid_summary">Üçlü kural çizgileri</string>
 
