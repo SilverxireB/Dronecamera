@@ -41,6 +41,7 @@ video çekimleri yapar. Kullanıcı dili: Türkçe. Cihaz: Honor Magic 8 Pro
 - DİKKAT: CameraX 1.3.4'te `Preview.Builder.setPreviewStabilizationEnabled` ve
   `VideoCapture.Builder.setVideoStabilizationEnabled` YOK (1.4 ile geldi) — derleme
   hatası verir. Sabitleme Camera2 interop `CONTROL_VIDEO_STABILIZATION_MODE` ile yapılır.
+- strings.xml'de düz kesme işareti (') AAPT hatası verir — ya kaçır ya da kullanma.
 - CI log okuma: `get_job_logs` (failed_only, tail_lines=600) — logs_url'i curl ile
   indirme proxy'de engelli.
 - UI: buzlu cam (glass) paneller, çipler kodda üretilir (`buildChips`), XML'de boş
