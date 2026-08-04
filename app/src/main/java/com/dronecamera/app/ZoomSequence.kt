@@ -10,9 +10,15 @@ import kotlin.math.exp
 import kotlin.math.ln
 
 /**
- * Bir cekim boyunca zoom'un nasil hareket edecegini tanimlayan parcalar.
- * Rampalar logaritmik uzayda oynatilir: buyutme orani sabit hizda degisir,
- * boylece gecis goze dengeli gorunur.
+ * Bir cekim boyunca KADRAJIN nasil hareket edecegini tanimlayan parcalar.
+ *
+ * Kadraj iki bilesenden olusur: buyutme (zoom) ve kirpma penceresinin merkezi
+ * (cx, cy — 0..1, GL doku uzayinda). Zoom logaritmik uzayda, merkez dogrusal
+ * olarak yorumlanir; boylece buyume algisal olarak sabit hizda kalirken
+ * kaydirma da duzgun ilerler.
+ *
+ * Merkez varsayilanlari 0.5'tir; merkez belirtilmeyen cagrilar eskisi gibi
+ * yalnizca zoom hareketi uretir.
  */
 sealed class ZoomSegment {
     abstract val durationMs: Long
@@ -21,39 +27,74 @@ sealed class ZoomSegment {
         val from: Float,
         val to: Float,
         override val durationMs: Long,
-        val interpolator: TimeInterpolator
+        val interpolator: TimeInterpolator,
+        val fromCx: Float = CENTER,
+        val fromCy: Float = CENTER,
+        val toCx: Float = CENTER,
+        val toCy: Float = CENTER
     ) : ZoomSegment()
 
-    data class Hold(val zoom: Float, override val durationMs: Long) : ZoomSegment()
+    data class Hold(
+        val zoom: Float,
+        override val durationMs: Long,
+        val cx: Float = CENTER,
+        val cy: Float = CENTER
+    ) : ZoomSegment()
+
+    companion object {
+        const val CENTER = 0.5f
+    }
 }
 
 /**
- * Sekansin belirli bir anindaki zoom degerini hesaplar. Oynaticinin
- * seyreltilmis adimlarindan bagimsizdir; her karede cagrilarak tam degerin
- * elde edilmesini saglar (yazilim kirpmasi bunu kullanir).
+ * Sekansin belirli bir anindaki kadraji [out] dizisine yazar:
+ * `out[0] = zoom`, `out[1] = cx`, `out[2] = cy`.
+ *
+ * Oynaticinin seyreltilmis adimlarindan bagimsizdir; her karede cagrilarak
+ * tam deger elde edilir (yazilim kirpmasi bunu kullanir). Dizi disaridan
+ * verilir ki kare basina yeni nesne uretilmesin.
  */
-fun List<ZoomSegment>.zoomAt(elapsedMs: Long): Float {
+fun List<ZoomSegment>.frameAt(elapsedMs: Long, out: FloatArray) {
     var remaining = elapsedMs.coerceAtLeast(0L)
     for (segment in this) {
         if (remaining < segment.durationMs) {
-            return when (segment) {
-                is ZoomSegment.Hold -> segment.zoom
+            when (segment) {
+                is ZoomSegment.Hold -> {
+                    out[0] = segment.zoom
+                    out[1] = segment.cx
+                    out[2] = segment.cy
+                }
                 is ZoomSegment.Ramp -> {
                     val eased = segment.interpolator.getInterpolation(
                         remaining.toFloat() / segment.durationMs
                     )
                     val logFrom = ln(segment.from.toDouble())
                     val logTo = ln(segment.to.toDouble())
-                    exp(logFrom + (logTo - logFrom) * eased).toFloat()
+                    out[0] = exp(logFrom + (logTo - logFrom) * eased).toFloat()
+                    out[1] = segment.fromCx + (segment.toCx - segment.fromCx) * eased
+                    out[2] = segment.fromCy + (segment.toCy - segment.fromCy) * eased
                 }
             }
+            return
         }
         remaining -= segment.durationMs
     }
-    return when (val last = lastOrNull()) {
-        is ZoomSegment.Hold -> last.zoom
-        is ZoomSegment.Ramp -> last.to
-        else -> 1f
+    when (val last = lastOrNull()) {
+        is ZoomSegment.Hold -> {
+            out[0] = last.zoom
+            out[1] = last.cx
+            out[2] = last.cy
+        }
+        is ZoomSegment.Ramp -> {
+            out[0] = last.to
+            out[1] = last.toCx
+            out[2] = last.toCy
+        }
+        else -> {
+            out[0] = 1f
+            out[1] = ZoomSegment.CENTER
+            out[2] = ZoomSegment.CENTER
+        }
     }
 }
 
@@ -62,8 +103,9 @@ fun List<ZoomSegment>.zoomAt(elapsedMs: Long): Float {
  *
  * Titreme onlemi: ValueAnimator ekran tazeleme hizinda (120 Hz'e kadar)
  * tetiklenir; her tetiklemede kameraya yeni bir zoom istegi gondermek HAL'i
- * bogar ve goruntude sicramaya yol acar. Bu yuzden istekler ~30 Hz'e
- * seyreltilir ve anlamsiz kucuk degisimler atlanir.
+ * bogar ve goruntude sicramaya yol acar. Bu yuzden OPTIK istekler ~30 Hz'e
+ * seyreltilir. Yazilim kirpmasi bu oynaticiyi beklemez; her karede
+ * [frameAt] ile tam degeri hesaplar.
  */
 class ZoomSequencePlayer(
     private val segments: List<ZoomSegment>,

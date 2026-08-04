@@ -27,14 +27,20 @@ Bölge başlıklarıyla gezin (`// ---- ...` yorum satırları):
 - `Cekim akisi`: `onShutter()`, `withCountdown()/cancelCountdown()`, `takePhoto()`,
   `startRecording(sequence?)`, `stopShot()`, `setRecordingUi()`
 
-### CameraMode.kt (~55 satır)
-`ZoomCurve` (labelRes'li), `LensRange` (TELE/MAIN/FULL + `isSingleLens`),
-`CameraMode` (PHOTO/VIDEO/DRONE/BOOMERANG/STEP/VERTIGO/DRONIE) +
-`isZoomMode/usesFrontCamera/recordsVideo/allowsLensRange`.
+### CameraMode.kt (~90 satır)
+`ZoomCurve`, `LensRange` (TELE/MAIN/FULL), `CameraMode` (DRONE/REVEAL/PAN/
+BOOMERANG/STEP/TIMELAPSE/TWO_POINT/VERTIGO/DRONIE) + `usesFrontCamera/
+allowsLensRange/usesDirection/usesCurve/directionIsHorizontal`, `FramePoint`
+(İKİ NOKTA kadrajı: zoom + merkez).
 
-### ZoomSequence.kt (~140 satır)
-`ZoomSegment` (Ramp: logaritmik uzayda eased; Hold), `List<ZoomSegment>.zoomAt(ms)`
-(herhangi bir andaki tam değer — yazılım kırpması her karede bunu çağırır) ve
+### ProgressRing.kt (~60 satır)
+Deklanşörün çevresindeki ilerleme halkası (`progress` 0..1).
+
+### ZoomSequence.kt (~180 satır)
+`ZoomSegment` artık KADRAJ taşır: zoom + kırpma merkezi (cx, cy). Ramp zoom'u
+logaritmik, merkezi doğrusal yorumlar. `List<ZoomSegment>.frameAt(ms, out)`
+herhangi bir andaki [zoom, cx, cy] değerini yazar (kırpma her karede bunu
+çağırır; dizi dışarıdan verilir ki kare başına nesne üretilmesin) ve
 `ZoomSequencePlayer`. ÖNEMLİ: `emitZoom()` optik istekleri ~30 Hz'e seyreltir
 (MIN_INTERVAL_MS/MIN_ZOOM_STEP) — titreme çözümünün kalbi, dokunurken dikkat.
 

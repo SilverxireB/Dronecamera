@@ -27,13 +27,36 @@ enum class LensRange(val labelRes: Int) {
     val isSingleLens: Boolean get() = this != FULL
 }
 
-/** Uygulamanin cekim modlari. Hepsi otomatik zoom sekansiyla video ceker. */
+/**
+ * Cekim modlari. Hepsi kadraji (zoom + kirpma merkezi) zaman icinde
+ * hareket ettirerek video ceker.
+ */
 enum class CameraMode(val labelRes: Int) {
+    /** Sabit merkez, zoom rampasi. */
     DRONE(R.string.mode_drone),
+
+    /** Ozneden acilis: secilen noktadan baslayip genise ve ortaya acilir. */
+    REVEAL(R.string.mode_reveal),
+
+    /** Zoom sabit, kirpma penceresi yatay kayar (drone suzulmesi). */
+    PAN(R.string.mode_pan),
+
+    /** Gidis-donus zoom. */
     BOOMERANG(R.string.mode_boomerang),
+
+    /** Duraklamali kademeli zoom. */
     STEP(R.string.mode_step),
+
+    /** Uzun cekim, hizlandirilmis video. */
     TIMELAPSE(R.string.mode_timelapse),
+
+    /** Kullanicinin kurdugu iki kadraj arasinda gecis. */
+    TWO_POINT(R.string.mode_two_point),
+
+    /** Dolly zoom: kullanici yururken zoom ters yonde acilir. */
     VERTIGO(R.string.mode_vertigo),
+
+    /** On kamerayla uzaklasan selfie. */
     DRONIE(R.string.mode_dronie);
 
     val usesFrontCamera: Boolean
@@ -42,4 +65,19 @@ enum class CameraMode(val labelRes: Int) {
     /** Lens menzili secimi bu modda anlamli mi? */
     val allowsLensRange: Boolean
         get() = this != VERTIGO && this != DRONIE
+
+    /** Yon secimi (uzaklasma/yaklasma ya da saga/sola) bu modda anlamli mi? */
+    val usesDirection: Boolean
+        get() = this != TWO_POINT && this != VERTIGO && this != DRONIE
+
+    /** Hiz egrisi secilebilir mi (timelapse her zaman dogrusaldir)? */
+    val usesCurve: Boolean
+        get() = this != TIMELAPSE
+
+    /** Yon secimi yatay kaydirma anlamina mi geliyor? */
+    val directionIsHorizontal: Boolean
+        get() = this == PAN
 }
+
+/** Kullanicinin kurdugu bir kadraj: efektif zoom + kirpma merkezi. */
+data class FramePoint(val zoom: Float, val cx: Float, val cy: Float)

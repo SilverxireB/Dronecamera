@@ -37,12 +37,15 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
     var zoom: Float = 1f
 
     /**
-     * Ayarlandiginda zoom degeri her kare icin buradan okunur. Boylece kirpma
-     * kameranin kare hizina birebir oturur; 30 Hz'lik istek adimlarinin
-     * yarattigi kademeli gorunum ortadan kalkar.
+     * Ayarlandiginda kadraj (zoom + merkez) her kare icin buradan okunur:
+     * geri cagirim diziye [zoom, cx, cy] yazar. Boylece hareket kameranin
+     * kare hizina birebir oturur; 30 Hz'lik istek adimlarinin yarattigi
+     * kademeli gorunum ortadan kalkar.
      */
     @Volatile
-    var zoomProvider: (() -> Float)? = null
+    var frameProvider: ((FloatArray) -> Unit)? = null
+
+    private val frameOut = FloatArray(3)
 
     /**
      * Kirpma penceresinin merkezi (0..1, GL doku uzayinda). Varsayilan orta
@@ -201,7 +204,16 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
         texture.getTransformMatrix(stMatrix)
         val timestamp = texture.timestamp
 
-        val currentZoom = (zoomProvider?.invoke() ?: zoom).coerceAtLeast(1f)
+        var currentZoom = zoom
+        var currentCx = centerX
+        var currentCy = centerY
+        frameProvider?.let { provider ->
+            provider(frameOut)
+            currentZoom = frameOut[0]
+            currentCx = frameOut[1]
+            currentCy = frameOut[2]
+        }
+        currentZoom = currentZoom.coerceAtLeast(1f)
         val videoOutput = if (timeScale > 1f) resolveVideoOutput() else null
         outputs.forEach { (output, eglSurface) ->
             val isVideo = output === videoOutput
@@ -226,7 +238,7 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
             GLES20.glUniformMatrix4fv(uTexMatrix, 1, false, finalMatrix, 0)
             GLES20.glUniform1f(uZoom, currentZoom)
-            GLES20.glUniform2f(uCenter, centerX, centerY)
+            GLES20.glUniform2f(uCenter, currentCx, currentCy)
 
             GLES20.glEnableVertexAttribArray(aPosition)
             GLES20.glVertexAttribPointer(aPosition, 2, GLES20.GL_FLOAT, false, 0, vertices)

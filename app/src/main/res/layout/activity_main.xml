@@ -184,16 +184,15 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <ProgressBar
-            android:id="@+id/progressBar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="2dp"
-            android:layout_marginHorizontal="28dp"
-            android:layout_marginBottom="10dp"
-            android:max="100"
-            android:progressDrawable="@drawable/progress_line"
-            android:visibility="gone" />
+        <TextView
+            android:id="@+id/summaryText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="8dp"
+            android:letterSpacing="0.03"
+            android:textColor="@color/textTertiary"
+            android:textSize="11sp" />
 
         <HorizontalScrollView
             android:id="@+id/lensScroll"
@@ -211,6 +210,14 @@
                 android:gravity="center"
                 android:orientation="horizontal" />
         </HorizontalScrollView>
+
+        <LinearLayout
+            android:id="@+id/pointRow"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:orientation="horizontal"
+            android:visibility="gone" />
 
         <HorizontalScrollView
             android:id="@+id/modeScroll"
@@ -243,6 +250,12 @@
                 android:contentDescription="@string/desc_gallery"
                 android:scaleType="centerCrop"
                 android:visibility="gone" />
+
+            <com.dronecamera.app.ProgressRing
+                android:id="@+id/progressRing"
+                android:layout_width="92dp"
+                android:layout_height="92dp"
+                android:layout_gravity="center" />
 
             <View
                 android:id="@+id/shutterButton"

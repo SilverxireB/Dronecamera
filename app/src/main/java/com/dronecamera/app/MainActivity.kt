@@ -21,6 +21,7 @@ import android.util.Size
 import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.Surface
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -106,6 +107,26 @@ class MainActivity : AppCompatActivity() {
     /** Pozlama kaydiricisinin konumu (0..100); cihazin EV araligina eslenir. */
     private var exposurePercent = 50
     private var exposureLabel: TextView? = null
+    /** Kirpma merkezi (GL doku uzayi, 0..1). Dokunarak degistirilir. */
+    private var centerX = ZoomSegment.CENTER
+    private var centerY = ZoomSegment.CENTER
+    /** IKI NOKTA modunda kullanicinin kurdugu kadrajlar. */
+    private var pointA: FramePoint? = null
+    private var pointB: FramePoint? = null
+    /** IKI NOKTA modunda parmakla kurulan canli efektif zoom. */
+    private var composeZoom = 0f
+
+    // Ayar paneli satirlari (moda gore gosterilip gizlenir)
+    private var rowDuration: LinearLayout? = null
+    private var rowDirection: LinearLayout? = null
+    private var rowCurve: LinearLayout? = null
+    private var rowTimelapse: LinearLayout? = null
+    private var rowCountdown: LinearLayout? = null
+    private var rowSoftZoom: LinearLayout? = null
+    private var rowThreshold: LinearLayout? = null
+    private var rowQuality: LinearLayout? = null
+    private var rowFps: LinearLayout? = null
+    private var rowExposure: LinearLayout? = null
 
     private var lastVideoUri: Uri? = null
     private var isShotRunning = false
@@ -140,6 +161,7 @@ class MainActivity : AppCompatActivity() {
 
         buildModeCarousel()
         buildLensSegments()
+        buildPointButtons()
         buildSettingsSheet()
         setupControls()
         refreshAll()
@@ -175,6 +197,8 @@ class MainActivity : AppCompatActivity() {
         muteAudio = prefs.getBoolean("muteAudio", muteAudio)
         timelapseSpeed = prefs.getInt("timelapseSpeed", timelapseSpeed)
         exposurePercent = prefs.getInt("exposurePercent", exposurePercent)
+        pointA = loadPoint("A")
+        pointB = loadPoint("B")
     }
 
     private fun savePrefs() {
@@ -196,6 +220,30 @@ class MainActivity : AppCompatActivity() {
             .putInt("timelapseSpeed", timelapseSpeed)
             .putInt("exposurePercent", exposurePercent)
             .apply()
+        savePoint("A", pointA)
+        savePoint("B", pointB)
+    }
+
+    private fun loadPoint(key: String): FramePoint? {
+        if (!prefs.getBoolean("pt${key}_set", false)) return null
+        return FramePoint(
+            prefs.getFloat("pt${key}_z", 1f),
+            prefs.getFloat("pt${key}_x", ZoomSegment.CENTER),
+            prefs.getFloat("pt${key}_y", ZoomSegment.CENTER)
+        )
+    }
+
+    private fun savePoint(key: String, point: FramePoint?) {
+        val editor = prefs.edit()
+        if (point == null) {
+            editor.putBoolean("pt${key}_set", false)
+        } else {
+            editor.putBoolean("pt${key}_set", true)
+                .putFloat("pt${key}_z", point.zoom)
+                .putFloat("pt${key}_x", point.cx)
+                .putFloat("pt${key}_y", point.cy)
+        }
+        editor.apply()
     }
 
     // ---------------------------------------------------------------- Sablonlar
@@ -276,12 +324,14 @@ class MainActivity : AppCompatActivity() {
 
     /** Baslik + yatay cip grubu ekler ve secim boyamasini kaydeder. */
     private fun <T> addChipRow(
-        container: LinearLayout,
+        parent: LinearLayout,
         titleRes: Int,
         items: List<Pair<T, String>>,
         current: () -> T,
         onSelect: (T) -> Unit
-    ) {
+    ): LinearLayout {
+        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        parent.addView(container)
         container.addView(TextView(this).apply {
             text = getString(titleRes)
             textSize = 11f
@@ -310,6 +360,18 @@ class MainActivity : AppCompatActivity() {
             addView(row)
         })
         refreshers += { chips.forEach { (key, chip) -> styleChip(chip, key == current()) } }
+        return container
+    }
+
+    /** Bolum basligi (ayar panelini gruplara ayirir). */
+    private fun addSection(parent: LinearLayout, titleRes: Int) {
+        parent.addView(TextView(this).apply {
+            text = getString(titleRes)
+            textSize = 10f
+            letterSpacing = 0.2f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accentIce))
+            setPadding(dp(4), dp(22), 0, 0)
+        })
     }
 
     private fun addSwitchRow(
@@ -386,6 +448,7 @@ class MainActivity : AppCompatActivity() {
                 if (isBusy() || mode == m) return@setOnClickListener
                 haptic(item)
                 mode = m
+                composeZoom = 0f
                 savePrefs()
                 applyModeToUi()
                 refreshAll()
@@ -481,6 +544,15 @@ class MainActivity : AppCompatActivity() {
         LensRange.MAIN -> min(lensThreshold - 0.2f, deviceMax)
     }
 
+    /**
+     * Cekim boyunca optik zoom'un tutulacagi sabit deger. Kaydirma modunda
+     * zoom sabittir; digerlerinde rampanin en dusuk ucudur.
+     */
+    private fun opticalBasisFor(range: Pair<Float, Float>): Float {
+        val lowest = if (mode == CameraMode.PAN) range.first else min(range.first, range.second)
+        return min(lowest, currentOpticalCeiling())
+    }
+
     private fun currentOpticalCeiling(): Float {
         val deviceMax = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 1f
         return if (mode.allowsLensRange) opticalCeiling(lensRange, deviceMax) else deviceMax
@@ -504,30 +576,90 @@ class MainActivity : AppCompatActivity() {
         camera?.cameraControl?.setZoomRatio(optical)
         softZoomLevel = (effective / optical).coerceIn(1f, MAX_SOFT_CROP)
         zoomProcessor?.zoom = softZoomLevel
+        zoomProcessor?.setCenter(centerX, centerY)
         // Rozet dogrudan burada guncellenir: optik deger ayni kalip yalnizca
         // yazilim kirpmasi degistiginde zoom gozlemcisi tetiklenmiyor.
         updateZoomBadge(effective)
     }
 
+    /**
+     * IKI NOKTA modunun A/B kadraj tuslari.
+     * Dokun: kayitli kadraja git · Basili tut: mevcut kadraji kaydet.
+     */
+    private fun buildPointButtons() {
+        val entries = listOf(
+            getString(R.string.point_a) to true,
+            getString(R.string.point_b) to false
+        )
+        val chips = entries.map { (label, isA) ->
+            val chip = makeChip(label)
+            chip.setOnClickListener {
+                if (isBusy()) return@setOnClickListener
+                haptic(chip)
+                val point = if (isA) pointA else pointB
+                if (point == null) {
+                    Toast.makeText(this, getString(R.string.point_empty, label), Toast.LENGTH_SHORT)
+                        .show()
+                } else {
+                    centerX = point.cx
+                    centerY = point.cy
+                    composeZoom = point.zoom
+                    applyEffectiveZoom(point.zoom)
+                    Toast.makeText(
+                        this, getString(R.string.point_recalled, label), Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+            chip.setOnLongClickListener {
+                if (!isBusy()) {
+                    haptic(chip)
+                    val zoom = if (composeZoom > 0f) composeZoom else currentEffectiveZoom()
+                    val point = FramePoint(zoom, centerX, centerY)
+                    if (isA) pointA = point else pointB = point
+                    savePrefs()
+                    refreshAll()
+                    applyModeToUi()
+                    Toast.makeText(
+                        this, getString(R.string.point_saved, label), Toast.LENGTH_SHORT
+                    ).show()
+                }
+                true
+            }
+            binding.pointRow.addView(chip)
+            Triple(label, isA, chip)
+        }
+        refreshers += {
+            chips.forEach { (_, isA, chip) ->
+                styleChip(chip, (if (isA) pointA else pointB) != null)
+            }
+        }
+    }
+
+    /** Onizlemede o an gecerli olan efektif zoom. */
+    private fun currentEffectiveZoom(): Float =
+        (camera?.cameraInfo?.zoomState?.value?.zoomRatio ?: 1f) * softZoomLevel
+
     private fun buildSettingsSheet() {
         val content = binding.settingsContent
 
-        addChipRow(
+        addSection(content, R.string.section_motion)
+        rowDuration = addChipRow(
             content, R.string.label_duration,
             listOf(8, 10, 15, 20, 30).map { it to getString(R.string.duration_fmt, it) },
             { durationSec }, { durationSec = it }
         )
-        addChipRow(
-            content, R.string.label_direction,
-            listOf(true to getString(R.string.dir_out), false to getString(R.string.dir_in)),
-            { zoomOut }, { zoomOut = it }
-        )
-        addChipRow(
+        rowDirection = addDirectionRow(content)
+        rowCurve = addChipRow(
             content, R.string.label_curve,
             ZoomCurve.values().map { it to getString(it.labelRes) },
             { curve }, { curve = it }
         )
-        addChipRow(
+        rowTimelapse = addChipRow(
+            content, R.string.label_timelapse,
+            listOf(5, 10, 20).map { it to getString(R.string.timelapse_fmt, it) },
+            { timelapseSpeed }, { timelapseSpeed = it }
+        )
+        rowCountdown = addChipRow(
             content, R.string.label_countdown,
             listOf(
                 0 to getString(R.string.countdown_off),
@@ -537,7 +669,8 @@ class MainActivity : AppCompatActivity() {
             { countdownSec }, { countdownSec = it }
         )
 
-        addChipRow(
+        addSection(content, R.string.section_frame)
+        rowSoftZoom = addChipRow(
             content, R.string.label_soft_zoom,
             listOf(
                 1f to getString(R.string.soft_off),
@@ -547,16 +680,28 @@ class MainActivity : AppCompatActivity() {
             ),
             { softZoomMax }, { softZoomMax = it; bindCamera() }
         )
+        rowThreshold = addThresholdRow(content)
 
-        addChipRow(
-            content, R.string.label_timelapse,
-            listOf(5, 10, 20).map { it to getString(R.string.timelapse_fmt, it) },
-            { timelapseSpeed }, { timelapseSpeed = it }
+        addSection(content, R.string.section_image)
+        rowQuality = addChipRow(
+            content, R.string.label_quality,
+            listOf(
+                true to getString(R.string.quality_uhd),
+                false to getString(R.string.quality_fhd)
+            ),
+            { recordUhd }, { recordUhd = it; bindCamera() }
         )
+        rowFps = addChipRow(
+            content, R.string.label_fps,
+            listOf(
+                30 to getString(R.string.fps_30),
+                60 to getString(R.string.fps_60)
+            ),
+            { targetFps }, { targetFps = it; applyCaptureOptions(locked = false) }
+        )
+        rowExposure = addExposureRow(content)
 
-        addExposureRow(content)
-        addThresholdRow(content)
-
+        addSection(content, R.string.section_system)
         addSwitchRow(
             content, R.string.opt_lock_title, R.string.opt_lock_summary,
             { lockExposure }, { lockExposure = it }
@@ -573,25 +718,50 @@ class MainActivity : AppCompatActivity() {
             content, R.string.opt_mute_title, R.string.opt_mute_summary,
             { muteAudio }, { muteAudio = it }
         )
-
-        addChipRow(
-            content, R.string.label_quality,
-            listOf(
-                true to getString(R.string.quality_uhd),
-                false to getString(R.string.quality_fhd)
-            ),
-            { recordUhd }, { recordUhd = it; bindCamera() }
-        )
-        addChipRow(
-            content, R.string.label_fps,
-            listOf(
-                30 to getString(R.string.fps_30),
-                60 to getString(R.string.fps_60)
-            ),
-            { targetFps }, { targetFps = it; applyCaptureOptions(locked = false) }
-        )
-
         addPresetRow(content)
+    }
+
+    /**
+     * Yon satiri: etiketler moda gore degisir (uzaklasma/yaklasma ya da
+     * saga/sola), bu yuzden elle kurulur.
+     */
+    private fun addDirectionRow(parent: LinearLayout): LinearLayout {
+        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        parent.addView(container)
+        container.addView(TextView(this).apply {
+            text = getString(R.string.label_direction)
+            textSize = 11f
+            letterSpacing = 0.12f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textTertiary))
+            setPadding(dp(4), dp(14), 0, dp(8))
+        })
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val chips = listOf(true, false).map { forward ->
+            val chip = makeChip("")
+            chip.setOnClickListener {
+                if (isBusy()) return@setOnClickListener
+                haptic(chip)
+                zoomOut = forward
+                savePrefs()
+                refreshAll()
+                applyStartZoom()
+            }
+            row.addView(chip)
+            forward to chip
+        }
+        container.addView(row)
+        refreshers += {
+            chips.forEach { (forward, chip) ->
+                chip.text = when {
+                    mode.directionIsHorizontal && forward -> getString(R.string.dir_right)
+                    mode.directionIsHorizontal -> getString(R.string.dir_left)
+                    forward -> getString(R.string.dir_out)
+                    else -> getString(R.string.dir_in)
+                }
+                styleChip(chip, forward == zoomOut)
+            }
+        }
+        return container
     }
 
     /** Cekim ayarlarinin tamamini saklayan uc sablon slotu. */
@@ -638,7 +808,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Pozlama telafisi kaydiricisi (cihazin EV araligina eslenir). */
-    private fun addExposureRow(container: LinearLayout) {
+    private fun addExposureRow(parent: LinearLayout): LinearLayout {
+        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        parent.addView(container)
         container.addView(TextView(this).apply {
             text = getString(R.string.label_exposure)
             textSize = 11f
@@ -688,6 +860,7 @@ class MainActivity : AppCompatActivity() {
         })
         container.addView(bar)
         refreshers += { bar.progress = exposurePercent }
+        return container
     }
 
     /**
@@ -695,7 +868,9 @@ class MainActivity : AppCompatActivity() {
      * gider, boylece kullanici goruntunun sicradigi noktayi kendi gozuyle
      * bulup esigi tam oraya ayarlar.
      */
-    private fun addThresholdRow(container: LinearLayout) {
+    private fun addThresholdRow(parent: LinearLayout): LinearLayout {
+        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        parent.addView(container)
         container.addView(TextView(this).apply {
             text = getString(R.string.label_threshold)
             textSize = 11f
@@ -739,6 +914,7 @@ class MainActivity : AppCompatActivity() {
         container.addView(bar)
         value.text = getString(R.string.zoom_format, lensThreshold)
         refreshers += { value.text = getString(R.string.zoom_format, lensThreshold) }
+        return container
     }
 
     private fun setupControls() {
@@ -755,6 +931,8 @@ class MainActivity : AppCompatActivity() {
             toggleSettings(false)
         }
         binding.settingsScrim.setOnClickListener { toggleSettings(false) }
+        binding.progressRing.ringWidth = dp(4).toFloat()
+        binding.progressRing.ringColor = ContextCompat.getColor(this, R.color.accentIce)
         binding.btnRehearse.setOnClickListener {
             haptic(it)
             runRehearsal()
@@ -785,11 +963,35 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
         })
+        // IKI NOKTA modunda parmakla efektif zoom kurulur; diger modlarda
+        // zoom rampanin kendisi tarafindan belirlendigi icin kapalidir.
+        val pinchDetector = ScaleGestureDetector(
+            this,
+            object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(detector: ScaleGestureDetector): Boolean {
+                    if (mode != CameraMode.TWO_POINT || isBusy()) return false
+                    val state = camera?.cameraInfo?.zoomState?.value ?: return false
+                    val bounds = zoomBoundsFor(
+                        lensRange, state.minZoomRatio, state.maxZoomRatio
+                    )
+                    val base = if (composeZoom > 0f) composeZoom else currentEffectiveZoom()
+                    composeZoom = (base * detector.scaleFactor)
+                        .coerceIn(bounds.first, bounds.second)
+                    applyEffectiveZoom(composeZoom)
+                    return true
+                }
+            }
+        )
         binding.previewView.setOnTouchListener { _, event ->
-            if (isBusy()) true else tapDetector.onTouchEvent(event)
+            if (isBusy()) return@setOnTouchListener true
+            var handled = false
+            if (mode == CameraMode.TWO_POINT) handled = pinchDetector.onTouchEvent(event)
+            handled or tapDetector.onTouchEvent(event)
         }
 
+        refreshers += { updateSummary() }
         sizeSettingsSheet()
+        applyOrientationLayout()
         applyModeToUi()
     }
 
@@ -816,7 +1018,9 @@ class MainActivity : AppCompatActivity() {
         if (width <= 0f || height <= 0f) return
 
         // GL doku uzayinda dikey eksen terstir.
-        zoomProcessor?.setCenter((x / width).coerceIn(0f, 1f), 1f - (y / height).coerceIn(0f, 1f))
+        centerX = (x / width).coerceIn(0f, 1f)
+        centerY = 1f - (y / height).coerceIn(0f, 1f)
+        zoomProcessor?.setCenter(centerX, centerY)
 
         // Kirpma penceresi tum kareyi kapliyorsa merkezi kaydiracak pay yoktur.
         if (zoomProcessor == null || softZoomLevel < 1.05f) {
@@ -833,7 +1037,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun resetFrameCenter() {
-        zoomProcessor?.setCenter(0.5f, 0.5f)
+        centerX = ZoomSegment.CENTER
+        centerY = ZoomSegment.CENTER
+        zoomProcessor?.setCenter(centerX, centerY)
         showFocusMarker(binding.previewView.width / 2f, binding.previewView.height / 2f)
     }
 
@@ -874,6 +1080,15 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /** Yatayda dikey alan kisitli oldugu icin alt panel sikistirilir. */
+    private fun applyOrientationLayout() {
+        val landscape =
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        binding.bottomPanel.setPadding(
+            0, dp(if (landscape) 4 else 10), 0, dp(if (landscape) 8 else 22)
+        )
+    }
+
     /** Ayar paneli yatayda ekrani doldurmasin diye yuksekligi ekrana uydurulur. */
     private fun sizeSettingsSheet() {
         val maxHeight = (resources.displayMetrics.heightPixels * 0.45f).toInt()
@@ -886,6 +1101,7 @@ class MainActivity : AppCompatActivity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         sizeSettingsSheet()
+        applyOrientationLayout()
         // Yalnizca hedef yonu guncellemek yetmiyor: GPU efekti devredeyken
         // goruntu hatti baglanma anindaki yone gore kuruluyor ve sahne donuk
         // kaliyor. Bu yuzden kamera yeni yonle bastan baglanir.
@@ -946,22 +1162,34 @@ class MainActivity : AppCompatActivity() {
     private fun runRehearsal() {
         if (isBusy()) return
         val range = resolveZoomRange() ?: return
-        rampOpticalBasis = min(min(range.first, range.second), currentOpticalCeiling())
+        rampOpticalBasis = opticalBasisFor(range)
         applyEffectiveZoom(range.first)
 
-        val rehearsal = listOf(
-            ZoomSegment.Ramp(range.first, range.second, REHEARSAL_MS, curveInterpolator())
-        )
+        // Prova, modun kendi kadraj yolunu sikistirilmis surede oynatir.
+        val full = buildSequence(range.first, range.second)
+        val totalMs = full.sumOf { it.durationMs }.coerceAtLeast(1L)
+        val scale = REHEARSAL_MS.toFloat() / totalMs
+        val rehearsal = full.map { segment ->
+            when (segment) {
+                is ZoomSegment.Hold -> segment.copy(
+                    durationMs = (segment.durationMs * scale).toLong().coerceAtLeast(1L)
+                )
+                is ZoomSegment.Ramp -> segment.copy(
+                    durationMs = (segment.durationMs * scale).toLong().coerceAtLeast(1L)
+                )
+            }
+        }
+        if (rehearsal.isEmpty()) return
+
         isRehearsing = true
         binding.btnRehearse.text = getString(R.string.rehearse_running)
-        setVisible(binding.progressBar, true)
 
         val startedAt = SystemClock.elapsedRealtime()
         val basis = rampOpticalBasis
         val softwareRamp = zoomProcessor != null && basis > 0f
-        zoomProcessor?.zoomProvider = {
-            val target = rehearsal.zoomAt(SystemClock.elapsedRealtime() - startedAt)
-            (target / basis).coerceIn(1f, MAX_SOFT_CROP)
+        zoomProcessor?.frameProvider = { out ->
+            rehearsal.frameAt(SystemClock.elapsedRealtime() - startedAt, out)
+            out[0] = (out[0] / basis).coerceIn(1f, MAX_SOFT_CROP)
         }
 
         sequencePlayer = ZoomSequencePlayer(
@@ -971,14 +1199,14 @@ class MainActivity : AppCompatActivity() {
                 if (!softwareRamp) applyEffectiveZoom(effective)
             },
             onProgress = { fraction, _ ->
-                binding.progressBar.progress = (fraction * 100).toInt()
+                binding.progressRing.progress = fraction
             },
             onEnd = {
                 isRehearsing = false
-                zoomProcessor?.zoomProvider = null
+                zoomProcessor?.frameProvider = null
                 sequencePlayer = null
+                binding.progressRing.progress = 0f
                 binding.btnRehearse.text = getString(R.string.rehearse)
-                setVisible(binding.progressBar, false)
                 applyStartZoom()
             }
         ).also { it.start() }
@@ -987,11 +1215,29 @@ class MainActivity : AppCompatActivity() {
     /** Moda gore hangi kontrollerin gorunecegini ayarlar. */
     private fun applyModeToUi() {
         setVisible(binding.lensScroll, mode.allowsLensRange)
+        setVisible(binding.pointRow, mode == CameraMode.TWO_POINT)
         binding.gridGroup.visibility = gridVisibility()
+
+        // Ayar satirlari yalnizca ilgili modlarda gorunur.
+        rowDuration?.let { setVisible(it, true) }
+        rowDirection?.let { setVisible(it, mode.usesDirection) }
+        rowCurve?.let { setVisible(it, mode.usesCurve) }
+        rowTimelapse?.let { setVisible(it, mode == CameraMode.TIMELAPSE) }
+        rowCountdown?.let { setVisible(it, true) }
+        rowSoftZoom?.let { setVisible(it, true) }
+        rowThreshold?.let { setVisible(it, mode.allowsLensRange) }
+        rowQuality?.let { setVisible(it, true) }
+        rowFps?.let { setVisible(it, mode != CameraMode.TIMELAPSE) }
+        rowExposure?.let { setVisible(it, true) }
+
+        updateSummary()
 
         when (mode) {
             CameraMode.VERTIGO -> showGuide(R.string.vertigo_guide)
             CameraMode.DRONIE -> showGuide(R.string.dronie_guide)
+            CameraMode.REVEAL -> showGuide(R.string.reveal_guide)
+            CameraMode.PAN -> showGuide(R.string.pan_guide)
+            CameraMode.TWO_POINT -> showGuide(R.string.two_point_guide)
             CameraMode.TIMELAPSE -> {
                 val totalSec = durationSec * timelapseSpeed
                 val shootTime = if (totalSec >= 60) {
@@ -1007,6 +1253,52 @@ class MainActivity : AppCompatActivity() {
                 if (lensRange == LensRange.FULL) showGuide(R.string.full_range_warning)
                 else binding.guideText.visibility = View.GONE
         }
+    }
+
+    /**
+     * Deklansorun ustundeki tek satirlik cekim ozeti: basmadan once ne
+     * olacagini okuyarak gorursun.
+     */
+    private fun updateSummary() {
+        val sep = getString(R.string.summary_sep)
+        val parts = mutableListOf<String>()
+
+        val state = camera?.cameraInfo?.zoomState?.value
+        if (mode == CameraMode.TWO_POINT) {
+            val a = pointA
+            val b = pointB
+            parts += if (a != null && b != null) {
+                "${fmtZoom(a.zoom)}x → ${fmtZoom(b.zoom)}x"
+            } else {
+                getString(R.string.point_missing)
+            }
+        } else if (state != null) {
+            val range = resolveZoomRange()
+            if (range != null) {
+                parts += if (mode == CameraMode.PAN) {
+                    "${fmtZoom(range.first)}x"
+                } else {
+                    "${fmtZoom(range.first)}–${fmtZoom(range.second)}x"
+                }
+            }
+        }
+
+        parts += if (mode == CameraMode.TIMELAPSE) {
+            getString(R.string.duration_fmt, durationSec * timelapseSpeed)
+        } else {
+            getString(R.string.duration_fmt, durationSec)
+        }
+        if (mode.usesDirection) {
+            parts += when {
+                mode.directionIsHorizontal && zoomOut -> getString(R.string.dir_right)
+                mode.directionIsHorizontal -> getString(R.string.dir_left)
+                zoomOut -> getString(R.string.dir_out)
+                else -> getString(R.string.dir_in)
+            }
+        }
+        if (mode.usesCurve) parts += getString(curve.labelRes)
+
+        binding.summaryText.text = parts.joinToString(sep)
     }
 
     private fun showGuide(textRes: Int) {
@@ -1167,6 +1459,7 @@ class MainActivity : AppCompatActivity() {
     private val zoomObserver = Observer<ZoomState> { state ->
         updateZoomBadge(state.zoomRatio * softZoomLevel)
         updateLensLabels()
+        updateSummary()
         // Zoom durumu baglanmadan hemen sonra hazir olmayabiliyor; baslangic
         // zoom'unu ilk gecerli deger gelince uygula.
         if (pendingStartZoom) {
@@ -1186,8 +1479,13 @@ class MainActivity : AppCompatActivity() {
     private fun applyStartZoom() {
         if (isBusy()) return
         val range = resolveZoomRange() ?: return
-        rampOpticalBasis = min(min(range.first, range.second), currentOpticalCeiling())
-        applyEffectiveZoom(range.first)
+        rampOpticalBasis = opticalBasisFor(range)
+        val target = if (mode == CameraMode.TWO_POINT && composeZoom > 0f) {
+            composeZoom
+        } else {
+            range.first
+        }
+        applyEffectiveZoom(target)
         applyModeToUi()
     }
 
@@ -1242,6 +1540,13 @@ class MainActivity : AppCompatActivity() {
         val deviceMin = state.minZoomRatio
         val deviceMax = state.maxZoomRatio
 
+        // IKI NOKTA modunda araligi kullanicinin kurdugu kadrajlar belirler.
+        if (mode == CameraMode.TWO_POINT) {
+            val a = pointA
+            val b = pointB
+            if (a != null && b != null) return a.zoom to b.zoom
+        }
+
         val (rawStart, rawEnd) = when (mode) {
             CameraMode.VERTIGO -> min(lensThreshold - 0.2f, deviceMax) to 1f
             CameraMode.DRONIE -> min(2.5f, deviceMax) to deviceMin
@@ -1273,16 +1578,66 @@ class MainActivity : AppCompatActivity() {
         val total = durationSec * 1000L
         return when (mode) {
             CameraMode.DRONE, CameraMode.DRONIE -> listOf(
-                ZoomSegment.Hold(startZoom, 800),
-                ZoomSegment.Ramp(startZoom, endZoom, total, curveInterpolator()),
-                ZoomSegment.Hold(endZoom, 800)
+                ZoomSegment.Hold(startZoom, 800, centerX, centerY),
+                ZoomSegment.Ramp(
+                    startZoom, endZoom, total, curveInterpolator(),
+                    centerX, centerY, centerX, centerY
+                ),
+                ZoomSegment.Hold(endZoom, 800, centerX, centerY)
             )
+            // Acilis: secilen noktadan baslar, genise acilirken merkez de ortaya kayar.
+            CameraMode.REVEAL -> listOf(
+                ZoomSegment.Hold(startZoom, 800, centerX, centerY),
+                ZoomSegment.Ramp(
+                    startZoom, endZoom, total, curveInterpolator(),
+                    centerX, centerY, ZoomSegment.CENTER, ZoomSegment.CENTER
+                ),
+                ZoomSegment.Hold(endZoom, 800, ZoomSegment.CENTER, ZoomSegment.CENTER)
+            )
+            // Kaydirma: zoom sabit, kirpma penceresi bir uctan digerine gider.
+            // Ucu 0/1 veriyoruz; golgeleyici zoom'a gore zaten kirpiyor, boylece
+            // mevcut pay ne kadarsa o kadar genis kayar.
+            CameraMode.PAN -> {
+                val fromX = if (zoomOut) 0f else 1f
+                val toX = if (zoomOut) 1f else 0f
+                listOf(
+                    ZoomSegment.Hold(startZoom, 600, fromX, centerY),
+                    ZoomSegment.Ramp(
+                        startZoom, startZoom, total, curveInterpolator(),
+                        fromX, centerY, toX, centerY
+                    ),
+                    ZoomSegment.Hold(startZoom, 600, toX, centerY)
+                )
+            }
+            // Iki nokta: kullanicinin kurdugu iki kadraj arasinda gecis.
+            CameraMode.TWO_POINT -> {
+                val a = pointA
+                val b = pointB
+                if (a == null || b == null) {
+                    emptyList()
+                } else {
+                    listOf(
+                        ZoomSegment.Hold(a.zoom, 600, a.cx, a.cy),
+                        ZoomSegment.Ramp(
+                            a.zoom, b.zoom, total, curveInterpolator(),
+                            a.cx, a.cy, b.cx, b.cy
+                        ),
+                        ZoomSegment.Hold(b.zoom, 600, b.cx, b.cy)
+                    )
+                }
+            }
             CameraMode.BOOMERANG -> listOf(
-                ZoomSegment.Hold(startZoom, 500),
-                ZoomSegment.Ramp(startZoom, endZoom, total / 2, curveInterpolator()),
-                ZoomSegment.Hold(endZoom, 500),
-                ZoomSegment.Ramp(endZoom, startZoom, total / 2, curveInterpolator()),
-                ZoomSegment.Hold(startZoom, 500)
+                ZoomSegment.Hold(startZoom, 500, centerX, centerY),
+                ZoomSegment.Ramp(
+                    startZoom, endZoom, total / 2, curveInterpolator(),
+                    centerX, centerY, centerX, centerY
+                ),
+                ZoomSegment.Hold(endZoom, 500, centerX, centerY),
+                ZoomSegment.Ramp(
+                    endZoom, startZoom, total / 2, curveInterpolator(),
+                    centerX, centerY, centerX, centerY
+                ),
+                ZoomSegment.Hold(startZoom, 500, centerX, centerY)
             )
             CameraMode.STEP -> buildStepSequence(startZoom, endZoom, total)
             CameraMode.TIMELAPSE -> listOf(
@@ -1335,10 +1690,15 @@ class MainActivity : AppCompatActivity() {
         }
         if (settingsOpen) toggleSettings(false)
 
+        if (mode == CameraMode.TWO_POINT && (pointA == null || pointB == null)) {
+            Toast.makeText(this, R.string.point_missing, Toast.LENGTH_LONG).show()
+            return
+        }
         val range = resolveZoomRange() ?: return
-        rampOpticalBasis = min(min(range.first, range.second), currentOpticalCeiling())
+        rampOpticalBasis = opticalBasisFor(range)
         applyEffectiveZoom(range.first)
         val sequence = buildSequence(range.first, range.second)
+        if (sequence.isEmpty()) return
 
         withCountdown {
             // Odak/pozlama kilidi kayit BASLAMADAN once verilir ve oturmasi
@@ -1450,9 +1810,9 @@ class MainActivity : AppCompatActivity() {
         val basis = rampOpticalBasis
 
         // Optik zoom zaten onizlemede dogru degerde; burada DEGISTIRILMEZ.
-        processor?.zoomProvider = {
-            val target = sequence.zoomAt(SystemClock.elapsedRealtime() - startedAt)
-            (target / basis).coerceIn(1f, MAX_SOFT_CROP)
+        processor?.frameProvider = { out ->
+            sequence.frameAt(SystemClock.elapsedRealtime() - startedAt, out)
+            out[0] = (out[0] / basis).coerceIn(1f, MAX_SOFT_CROP)
         }
 
         sequencePlayer = ZoomSequencePlayer(
@@ -1462,7 +1822,7 @@ class MainActivity : AppCompatActivity() {
                 if (!softwareRamp) applyEffectiveZoom(effective)
             },
             onProgress = { fraction, remainingSec ->
-                binding.progressBar.progress = (fraction * 100).toInt()
+                binding.progressRing.progress = fraction
                 binding.remainText.text = getString(R.string.remaining_fmt, remainingSec)
             },
             onEnd = { stopShot() }
@@ -1470,7 +1830,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopShot() {
-        zoomProcessor?.zoomProvider = null
+        zoomProcessor?.frameProvider = null
         zoomProcessor?.endTimelapse()
         sequencePlayer?.cancel()
         sequencePlayer = null
@@ -1486,8 +1846,7 @@ class MainActivity : AppCompatActivity() {
         setVisible(binding.recTimer, recording)
         setVisible(binding.remainText, recording)
         binding.recTimer.text = getString(R.string.timer_zero)
-        binding.progressBar.progress = 0
-        setVisible(binding.progressBar, recording)
+        binding.progressRing.progress = 0f
         binding.modeScroll.alpha = if (recording) 0.35f else 1f
         binding.lensScroll.alpha = if (recording) 0.35f else 1f
         binding.btnSettings.alpha = if (recording) 0.35f else 1f

@@ -4,6 +4,9 @@
 
     <!-- Modlar -->
     <string name="mode_drone">DRONE</string>
+    <string name="mode_reveal">AÇILIŞ</string>
+    <string name="mode_pan">KAYDIRMA</string>
+    <string name="mode_two_point">İKİ NOKTA</string>
     <string name="mode_boomerang">BUMERANG</string>
     <string name="mode_step">KADEMELİ</string>
     <string name="mode_timelapse">TIMELAPSE</string>
@@ -63,6 +66,8 @@
     <string name="duration_fmt">%d sn</string>
     <string name="dir_out">Uzaklaşma</string>
     <string name="dir_in">Yaklaşma</string>
+    <string name="dir_right">Sağa</string>
+    <string name="dir_left">Sola</string>
     <string name="curve_cinematic">Sinematik</string>
     <string name="curve_linear">Sabit</string>
     <string name="countdown_off">Kapalı</string>
@@ -81,8 +86,28 @@
     <string name="zoom_format">%.1fx</string>
     <string name="timer_zero">00:00</string>
 
+    <!-- Bolumler -->
+    <string name="section_frame">KADRAJ</string>
+    <string name="section_motion">HAREKET</string>
+    <string name="section_image">GÖRÜNTÜ</string>
+    <string name="section_system">SİSTEM</string>
+
+    <!-- Iki nokta -->
+    <string name="point_a">A</string>
+    <string name="point_b">B</string>
+    <string name="point_saved">%s kadrajı kaydedildi</string>
+    <string name="point_recalled">%s kadrajına gidildi</string>
+    <string name="point_empty">%s boş — kurup basılı tut</string>
+    <string name="point_missing">Önce A ve B kadrajlarını kaydet</string>
+
+    <!-- Ozet -->
+    <string name="summary_sep"> · </string>
+
     <!-- Rehberler -->
     <string name="vertigo_guide">Kayıt boyunca özneye doğru sabit hızda yürü</string>
+    <string name="reveal_guide">Özneye dokun: çekim oradan başlayıp geniş açıya açılır</string>
+    <string name="pan_guide">Kaydırma için yazılım zoom gerekir — pay ne kadar çoksa o kadar geniş kayar</string>
+    <string name="two_point_guide">Parmakla zoom kur, dokunarak merkez seç, sonra A veya B tuşunu basılı tut</string>
     <string name="dronie_guide">Telefonu yüzüne yakın tut, çekim uzaklaşarak açılır</string>
 
     <!-- Mesajlar -->
