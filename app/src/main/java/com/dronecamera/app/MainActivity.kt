@@ -18,7 +18,9 @@ import android.net.Uri
 import android.provider.MediaStore
 import android.util.Range
 import android.util.Size
+import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.Surface
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -98,6 +100,10 @@ class MainActivity : AppCompatActivity() {
     private var recordUhd = true
     private var targetFps = 30
     private var muteAudio = false
+    private var timelapseSpeed = 10
+    /** Pozlama kaydiricisinin konumu (0..100); cihazin EV araligina eslenir. */
+    private var exposurePercent = 50
+    private var exposureLabel: TextView? = null
 
     private var lastVideoUri: Uri? = null
     private var isShotRunning = false
@@ -165,6 +171,8 @@ class MainActivity : AppCompatActivity() {
         recordUhd = prefs.getBoolean("recordUhd", recordUhd)
         targetFps = prefs.getInt("targetFps", targetFps)
         muteAudio = prefs.getBoolean("muteAudio", muteAudio)
+        timelapseSpeed = prefs.getInt("timelapseSpeed", timelapseSpeed)
+        exposurePercent = prefs.getInt("exposurePercent", exposurePercent)
     }
 
     private fun savePrefs() {
@@ -183,6 +191,8 @@ class MainActivity : AppCompatActivity() {
             .putBoolean("recordUhd", recordUhd)
             .putInt("targetFps", targetFps)
             .putBoolean("muteAudio", muteAudio)
+            .putInt("timelapseSpeed", timelapseSpeed)
+            .putInt("exposurePercent", exposurePercent)
             .apply()
     }
 
@@ -536,6 +546,13 @@ class MainActivity : AppCompatActivity() {
             { softZoomMax }, { softZoomMax = it; bindCamera() }
         )
 
+        addChipRow(
+            content, R.string.label_timelapse,
+            listOf(5, 10, 20).map { it to getString(R.string.timelapse_fmt, it) },
+            { timelapseSpeed }, { timelapseSpeed = it }
+        )
+
+        addExposureRow(content)
         addThresholdRow(content)
 
         addSwitchRow(
@@ -616,6 +633,40 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(4), dp(6), 0, 0)
         })
         refreshers += { chips.forEach { (slot, chip) -> styleChip(chip, hasPreset(slot)) } }
+    }
+
+    /** Pozlama telafisi kaydiricisi (cihazin EV araligina eslenir). */
+    private fun addExposureRow(container: LinearLayout) {
+        container.addView(TextView(this).apply {
+            text = getString(R.string.label_exposure)
+            textSize = 11f
+            letterSpacing = 0.12f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textTertiary))
+            setPadding(dp(4), dp(18), 0, dp(2))
+        })
+        val label = TextView(this).apply {
+            textSize = 13f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accentIce))
+            setPadding(dp(4), 0, 0, dp(4))
+        }
+        container.addView(label)
+        exposureLabel = label
+
+        val bar = SeekBar(this).apply {
+            max = 100
+            progress = exposurePercent
+        }
+        bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                exposurePercent = progress
+                applyExposure()
+            }
+
+            override fun onStartTrackingTouch(sb: SeekBar?) = Unit
+            override fun onStopTrackingTouch(sb: SeekBar?) = savePrefs()
+        })
+        container.addView(bar)
+        refreshers += { bar.progress = exposurePercent }
     }
 
     /**
@@ -699,8 +750,23 @@ class MainActivity : AppCompatActivity() {
             true
         }
         // Cekim sirasinda onizlemeye dokunmak (odaklama/parmakla zoom) rampayi
-        // bozar; bu yuzden kayit ve prova boyunca dokunuslar yutulur.
-        binding.previewView.setOnTouchListener { _, _ -> isBusy() }
+        // bozar; kayit ve prova boyunca dokunuslar yutulur. Bos zamanda tek
+        // dokunus kadraj merkezini, cift dokunus merkezi sifirlar.
+        val tapDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            // Confirmed: cift dokunusun ilk vurusunda merkez bosuna kaymasin.
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                setFrameCenter(e.x, e.y)
+                return true
+            }
+
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                resetFrameCenter()
+                return true
+            }
+        })
+        binding.previewView.setOnTouchListener { _, event ->
+            if (isBusy()) true else tapDetector.onTouchEvent(event)
+        }
 
         sizeSettingsSheet()
         applyModeToUi()
@@ -717,6 +783,61 @@ class MainActivity : AppCompatActivity() {
     private fun gridVisibility() = if (showGrid) View.VISIBLE else View.GONE
 
     private fun currentRotation(): Int = binding.root.display?.rotation ?: Surface.ROTATION_0
+
+    /**
+     * Kirpma penceresinin merkezini dokunulan noktaya tasir ve ayni noktaya
+     * odaklanir. Boylece ozne kadrajin ortasinda olmak zorunda kalmaz; rampa
+     * boyunca secilen nokta merkezde tutulur.
+     */
+    private fun setFrameCenter(x: Float, y: Float) {
+        val width = binding.previewView.width.toFloat()
+        val height = binding.previewView.height.toFloat()
+        if (width <= 0f || height <= 0f) return
+
+        // GL doku uzayinda dikey eksen terstir.
+        zoomProcessor?.setCenter((x / width).coerceIn(0f, 1f), 1f - (y / height).coerceIn(0f, 1f))
+
+        runCatching {
+            val point = binding.previewView.meteringPointFactory.createPoint(x, y)
+            camera?.cameraControl?.startFocusAndMetering(
+                FocusMeteringAction.Builder(point).build()
+            )
+        }
+        showFocusMarker(x, y)
+    }
+
+    private fun resetFrameCenter() {
+        zoomProcessor?.setCenter(0.5f, 0.5f)
+        showFocusMarker(binding.previewView.width / 2f, binding.previewView.height / 2f)
+    }
+
+    private fun showFocusMarker(x: Float, y: Float) {
+        val marker = binding.focusMarker
+        val half = dp(35).toFloat()
+        marker.translationX = x - half
+        marker.translationY = y - half
+        marker.alpha = 1f
+        marker.visibility = View.VISIBLE
+        marker.animate().alpha(0f).setStartDelay(700).setDuration(400)
+            .withEndAction { marker.visibility = View.GONE }
+            .start()
+    }
+
+    /** Pozlama telafisini cihazin destekledigi araliga esleyerek uygular. */
+    private fun applyExposure() {
+        val info = camera?.cameraInfo ?: return
+        val state = info.exposureState
+        if (!state.isExposureCompensationSupported) {
+            exposureLabel?.text = getString(R.string.exposure_unsupported)
+            return
+        }
+        val range = state.exposureCompensationRange
+        val index = (range.lower + (range.upper - range.lower) * (exposurePercent / 100f)).toInt()
+        camera?.cameraControl?.setExposureCompensationIndex(index)
+        exposureLabel?.text = getString(
+            R.string.exposure_fmt, index * state.exposureCompensationStep.toFloat()
+        )
+    }
 
     /** Ayar paneli yatayda ekrani doldurmasin diye yuksekligi ekrana uydurulur. */
     private fun sizeSettingsSheet() {
@@ -836,6 +957,17 @@ class MainActivity : AppCompatActivity() {
         when (mode) {
             CameraMode.VERTIGO -> showGuide(R.string.vertigo_guide)
             CameraMode.DRONIE -> showGuide(R.string.dronie_guide)
+            CameraMode.TIMELAPSE -> {
+                val totalSec = durationSec * timelapseSpeed
+                val shootTime = if (totalSec >= 60) {
+                    getString(R.string.minutes_fmt, totalSec / 60f)
+                } else {
+                    getString(R.string.seconds_fmt, totalSec)
+                }
+                binding.guideText.text =
+                    getString(R.string.timelapse_guide, shootTime, durationSec)
+                binding.guideText.visibility = View.VISIBLE
+            }
             else ->
                 if (lensRange == LensRange.FULL) showGuide(R.string.full_range_warning)
                 else binding.guideText.visibility = View.GONE
@@ -922,6 +1054,7 @@ class MainActivity : AppCompatActivity() {
             camera = provider.bindToLifecycle(this, selector, group.build())
             observeZoom()
             applyCaptureOptions(locked = false)
+            applyExposure()
             applyStartZoom()
         } catch (e: Exception) {
             zoomProcessor?.release()
@@ -1121,6 +1254,14 @@ class MainActivity : AppCompatActivity() {
                 ZoomSegment.Hold(startZoom, 500)
             )
             CameraMode.STEP -> buildStepSequence(startZoom, endZoom, total)
+            CameraMode.TIMELAPSE -> listOf(
+                // Gercek cekim suresi hiz carpani kadar uzundur; kayit
+                // sirasinda kareler seyreltilip zaman damgalari sikistirildigi
+                // icin video secilen surede oynar.
+                ZoomSegment.Hold(startZoom, 800),
+                ZoomSegment.Ramp(startZoom, endZoom, total * timelapseSpeed, LinearInterpolator()),
+                ZoomSegment.Hold(endZoom, 800)
+            )
             CameraMode.VERTIGO -> listOf(
                 ZoomSegment.Hold(startZoom, 1000),
                 ZoomSegment.Ramp(startZoom, endZoom, total, LinearInterpolator()),
@@ -1224,7 +1365,9 @@ class MainActivity : AppCompatActivity() {
         val pending = videoCapture.output
             .prepareRecording(this, outputOptions)
             .apply {
-                if (!muteAudio && hasPermission(Manifest.permission.RECORD_AUDIO)) withAudioEnabled()
+                // Timelapse'te zaman sikistirildigi icin ses anlamsiz kalir.
+                val wantsAudio = !muteAudio && mode != CameraMode.TIMELAPSE
+                if (wantsAudio && hasPermission(Manifest.permission.RECORD_AUDIO)) withAudioEnabled()
             }
 
         activeRecording = pending.start(ContextCompat.getMainExecutor(this)) { event ->
@@ -1232,6 +1375,9 @@ class MainActivity : AppCompatActivity() {
                 is VideoRecordEvent.Start -> {
                     isShotRunning = true
                     setRecordingUi(true)
+                    if (mode == CameraMode.TIMELAPSE) {
+                        zoomProcessor?.beginTimelapse(timelapseSpeed.toFloat())
+                    }
                     startZoomSequence(sequence)
                 }
                 is VideoRecordEvent.Status -> {
@@ -1284,8 +1430,9 @@ class MainActivity : AppCompatActivity() {
                 updateZoomBadge(effective)
                 if (!softwareRamp) applyEffectiveZoom(effective)
             },
-            onProgress = { fraction, _ ->
+            onProgress = { fraction, remainingSec ->
                 binding.progressBar.progress = (fraction * 100).toInt()
+                binding.remainText.text = getString(R.string.remaining_fmt, remainingSec)
             },
             onEnd = { stopShot() }
         ).also { it.start() }
@@ -1293,6 +1440,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopShot() {
         zoomProcessor?.zoomProvider = null
+        zoomProcessor?.endTimelapse()
         sequencePlayer?.cancel()
         sequencePlayer = null
         activeRecording?.stop()
@@ -1305,6 +1453,7 @@ class MainActivity : AppCompatActivity() {
         )
         setVisible(binding.recDot, recording)
         setVisible(binding.recTimer, recording)
+        setVisible(binding.remainText, recording)
         binding.recTimer.text = getString(R.string.timer_zero)
         binding.progressBar.progress = 0
         setVisible(binding.progressBar, recording)

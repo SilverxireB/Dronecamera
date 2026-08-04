@@ -38,11 +38,14 @@ Bölge başlıklarıyla gezin (`// ---- ...` yorum satırları):
 `ZoomSequencePlayer`. ÖNEMLİ: `emitZoom()` optik istekleri ~30 Hz'e seyreltir
 (MIN_INTERVAL_MS/MIN_ZOOM_STEP) — titreme çözümünün kalbi, dokunurken dikkat.
 
-### ZoomSurfaceProcessor.kt (~330 satır)
+### ZoomSurfaceProcessor.kt (~400 satır)
 Donanım zoom tavanının (bu cihazda 10x) üstünü sağlayan GPU kırpma hattı.
 `SurfaceProcessor` uygular; kareleri OES dokusundan alıp kırpılmış olarak hem
 önizlemeye hem kayda çizer. `zoomProvider` ayarlıysa değer her kare için oradan
-okunur (akıcılığın kaynağı). `SoftZoomEffect` = CameraEffect sarmalayıcısı.
+okunur (akıcılığın kaynağı). `setCenter()` kırpma penceresini kaydırır (dokunarak
+kadraj merkezi). `beginTimelapse/endTimelapse` video çıkışına kareleri seyreltip
+zaman damgalarını sıkıştırır — timelapse böyle üretilir, önizleme gerçek zamanlı
+kalır. `SoftZoomEffect` = CameraEffect sarmalayıcısı.
 
 ## Kaynaklar (app/src/main/res/)
 

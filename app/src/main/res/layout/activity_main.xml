@@ -65,6 +65,15 @@
         android:visibility="gone"
         app:constraint_referenced_ids="gridV1,gridV2,gridH1,gridH2" />
 
+    <View
+        android:id="@+id/focusMarker"
+        android:layout_width="70dp"
+        android:layout_height="70dp"
+        android:background="@drawable/focus_ring"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
     <!-- Ust bilgi cubugu -->
     <LinearLayout
         android:id="@+id/topBar"
@@ -96,6 +105,15 @@
             android:letterSpacing="0.05"
             android:text="@string/timer_zero"
             android:textColor="@color/textPrimary"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/remainText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="12dp"
+            android:textColor="@color/accentIce"
             android:textSize="13sp"
             android:visibility="gone" />
 

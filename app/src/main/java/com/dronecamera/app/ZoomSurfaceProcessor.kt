@@ -44,6 +44,44 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
     @Volatile
     var zoomProvider: (() -> Float)? = null
 
+    /**
+     * Kirpma penceresinin merkezi (0..1, GL doku uzayinda). Varsayilan orta
+     * nokta; kullanici ekrana dokunarak degistirebilir. Zoom 1'e yaklastikca
+     * pencere zaten tum kareyi kapladigi icin merkez otomatik ortaya cekilir.
+     */
+    @Volatile
+    private var centerX = 0.5f
+
+    @Volatile
+    private var centerY = 0.5f
+
+    fun setCenter(x: Float, y: Float) {
+        centerX = x.coerceIn(0f, 1f)
+        centerY = y.coerceIn(0f, 1f)
+    }
+
+    /**
+     * Timelapse: video cikisina karelerin yalnizca [scale] katinda biri
+     * gonderilir ve zaman damgalari ayni oranda sikistirilir; sonuc [scale]
+     * kat hizli oynayan bir video olur. Onizleme gercek zamanli kalir.
+     */
+    @Volatile
+    private var timeScale = 1f
+    private var videoBaseTimestamp = -1L
+    private var videoFrameIndex = 0L
+
+    fun beginTimelapse(scale: Float) {
+        handler.post {
+            timeScale = scale.coerceAtLeast(1f)
+            videoBaseTimestamp = -1L
+            videoFrameIndex = 0L
+        }
+    }
+
+    fun endTimelapse() {
+        handler.post { timeScale = 1f }
+    }
+
     private val thread = HandlerThread("SoftZoomGL").apply { start() }
     private val handler = Handler(thread.looper)
     val executor = Executor { command -> handler.post(command) }
@@ -56,6 +94,7 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
     private var program = 0
     private var uTexMatrix = 0
     private var uZoom = 0
+    private var uCenter = 0
     private var aPosition = 0
     private var aTexCoord = 0
     private var textureId = 0
@@ -152,6 +191,15 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
 
         val currentZoom = (zoomProvider?.invoke() ?: zoom).coerceAtLeast(1f)
         outputs.forEach { (output, eglSurface) ->
+            val isVideo = output.targets == CameraEffect.VIDEO_CAPTURE
+            var presentationTime = timestamp
+            if (isVideo && timeScale > 1f) {
+                val skip = timeScale.toInt().coerceAtLeast(1)
+                if (videoFrameIndex++ % skip != 0L) return@forEach
+                if (videoBaseTimestamp < 0L) videoBaseTimestamp = timestamp
+                presentationTime = videoBaseTimestamp +
+                    ((timestamp - videoBaseTimestamp) / timeScale).toLong()
+            }
             if (!makeCurrent(eglSurface)) return@forEach
             output.updateTransformMatrix(finalMatrix, stMatrix)
 
@@ -165,6 +213,7 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
             GLES20.glUniformMatrix4fv(uTexMatrix, 1, false, finalMatrix, 0)
             GLES20.glUniform1f(uZoom, currentZoom)
+            GLES20.glUniform2f(uCenter, centerX, centerY)
 
             GLES20.glEnableVertexAttribArray(aPosition)
             GLES20.glVertexAttribPointer(aPosition, 2, GLES20.GL_FLOAT, false, 0, vertices)
@@ -174,7 +223,7 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
             GLES20.glDisableVertexAttribArray(aPosition)
             GLES20.glDisableVertexAttribArray(aTexCoord)
 
-            EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, timestamp)
+            EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, presentationTime)
             EGL14.eglSwapBuffers(eglDisplay, eglSurface)
         }
     }
@@ -212,6 +261,7 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
         program = buildProgram()
         uTexMatrix = GLES20.glGetUniformLocation(program, "uTexMatrix")
         uZoom = GLES20.glGetUniformLocation(program, "uZoom")
+        uCenter = GLES20.glGetUniformLocation(program, "uCenter")
         aPosition = GLES20.glGetAttribLocation(program, "aPosition")
         aTexCoord = GLES20.glGetAttribLocation(program, "aTextureCoord")
 
@@ -279,13 +329,16 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
         const val VERTEX_SHADER = """
             uniform mat4 uTexMatrix;
             uniform float uZoom;
+            uniform vec2 uCenter;
             attribute vec4 aPosition;
             attribute vec4 aTextureCoord;
             varying vec2 vTextureCoord;
             void main() {
                 gl_Position = aPosition;
-                vec2 centered = (aTextureCoord.xy - vec2(0.5)) / uZoom + vec2(0.5);
-                vTextureCoord = (uTexMatrix * vec4(centered, 0.0, 1.0)).xy;
+                float halfWin = 0.5 / uZoom;
+                vec2 c = clamp(uCenter, vec2(halfWin), vec2(1.0 - halfWin));
+                vec2 sampled = c + (aTextureCoord.xy - vec2(0.5)) / uZoom;
+                vTextureCoord = (uTexMatrix * vec4(sampled, 0.0, 1.0)).xy;
             }
         """
 

@@ -32,6 +32,7 @@ enum class CameraMode(val labelRes: Int) {
     DRONE(R.string.mode_drone),
     BOOMERANG(R.string.mode_boomerang),
     STEP(R.string.mode_step),
+    TIMELAPSE(R.string.mode_timelapse),
     VERTIGO(R.string.mode_vertigo),
     DRONIE(R.string.mode_dronie);
 

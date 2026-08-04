@@ -6,6 +6,7 @@
     <string name="mode_drone">DRONE</string>
     <string name="mode_boomerang">BUMERANG</string>
     <string name="mode_step">KADEMELİ</string>
+    <string name="mode_timelapse">TIMELAPSE</string>
     <string name="mode_vertigo">VERTİGO</string>
     <string name="mode_dronie">DRONIE</string>
 
@@ -33,6 +34,16 @@
     <string name="label_fps">KARE HIZI</string>
     <string name="fps_30">30 fps</string>
     <string name="fps_60">60 fps</string>
+    <string name="label_timelapse">TIMELAPSE HIZI</string>
+    <string name="timelapse_fmt">%d×</string>
+    <string name="minutes_fmt">%.1f dk</string>
+    <string name="seconds_fmt">%d sn</string>
+    <string name="timelapse_guide">Çekim %1$s sürer, video %2$d sn olur · telefonu sabitle</string>
+    <string name="label_exposure">POZLAMA</string>
+    <string name="exposure_fmt">%+.1f EV</string>
+    <string name="exposure_unsupported">Bu kamerada pozlama ayarı yok</string>
+    <string name="remaining_fmt">%.1f sn</string>
+    <string name="center_hint">Dokun: kadraj merkezi · Çift dokun: ortala</string>
     <string name="label_preset">ŞABLON</string>
     <string name="preset_fmt">%d</string>
     <string name="preset_hint">Dokun: yükle · Basılı tut: bu ayarları kaydet</string>
