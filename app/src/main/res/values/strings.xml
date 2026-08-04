@@ -11,27 +11,41 @@
     <string name="mode_vertigo">VERTİGO</string>
     <string name="mode_dronie">DRONIE</string>
 
-    <!-- Secenekler -->
-    <string name="label_duration">Süre</string>
-    <string name="label_curve">Eğri</string>
-    <string name="label_countdown">Sayaç</string>
+    <!-- Lens menzili -->
+    <string name="range_tele">Tele · tek lens</string>
+    <string name="range_main">Geniş · tek lens</string>
+    <string name="range_full">Tam menzil</string>
+    <string name="full_range_warning">Tam menzilde lens değişimi görünür olabilir</string>
+
+    <!-- Ayarlar -->
+    <string name="settings_title">ÇEKİM AYARLARI</string>
+    <string name="label_duration">SÜRE</string>
+    <string name="label_direction">YÖN</string>
+    <string name="label_curve">HIZ EĞRİSİ</string>
+    <string name="label_countdown">GERİ SAYIM</string>
+    <string name="label_threshold">LENS EŞİĞİ</string>
+    <string name="threshold_help">Kaydırıcıyı oynat, görüntünün sıçradığı değeri bul. Tek lens menzilleri bu eşiğin iki yanında kalır.</string>
     <string name="duration_fmt">%d sn</string>
-    <string name="dir_out">Yön: Uzaklaşma</string>
-    <string name="dir_in">Yön: Yaklaşma</string>
+    <string name="dir_out">Uzaklaşma</string>
+    <string name="dir_in">Yaklaşma</string>
     <string name="curve_cinematic">Sinematik</string>
     <string name="curve_linear">Sabit</string>
     <string name="curve_aggressive">Sert</string>
     <string name="countdown_off">Kapalı</string>
-    <string name="label_start_zoom">Başlangıç</string>
-    <string name="start_zoom_fmt">%dx</string>
     <string name="countdown_3">3 sn</string>
     <string name="countdown_10">10 sn</string>
+
+    <string name="opt_lock_title">Pozlama ve odak kilidi</string>
+    <string name="opt_lock_summary">Çekim boyunca parlaklık, renk ve odak sabit kalır</string>
+    <string name="opt_stab_title">Sabitleme</string>
+    <string name="opt_stab_summary">Titremeyi azaltır, kadrajı bir miktar daraltır</string>
+    <string name="opt_grid_title">Izgara</string>
+    <string name="opt_grid_summary">Üçlü kural çizgileri</string>
 
     <!-- Gostergeler -->
     <string name="zoom_placeholder">1.0x</string>
     <string name="zoom_format">%.1fx</string>
     <string name="timer_zero">00:00</string>
-    <string name="remaining_fmt">%.0f sn</string>
 
     <!-- Rehberler -->
     <string name="vertigo_guide">Kayıt boyunca özneye doğru sabit hızda yürü</string>
@@ -46,8 +60,8 @@
     <string name="camera_permission_needed">Uygulamanın çalışması için kamera izni gerekli.</string>
 
     <!-- Erisilebilirlik -->
-    <string name="desc_lock">Pozlama kilidi</string>
-    <string name="desc_lens">Tek lens modu</string>
+    <string name="desc_settings">Ayarlar</string>
+    <string name="desc_close">Kapat</string>
     <string name="desc_flip">Kamera değiştir</string>
     <string name="desc_shutter">Deklanşör</string>
 </resources>

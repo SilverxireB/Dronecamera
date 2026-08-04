@@ -27,7 +27,13 @@ video çekimleri yapar. Kullanıcı dili: Türkçe. Cihaz: Honor Magic 8 Pro
 - Zoom rampaları logaritmik uzayda (algısal sabit hız) → `ZoomSequencePlayer`.
 - Lens geçişi sıçramalarına karşı: çekimde AE/AWB kilidi + EIS (`applyCaptureOptions`).
 - Honor fiziksel kamerayı uygulamalara AÇMIYOR → tek lens modu mantıksal kameraya
-  düşer; çözüm: başlangıç zoom'u eşik altına çekilebilir (2x–8x çipleri, varsayılan 3x).
+  düşer. ÇÖZÜM: zoom aralığını tek bir lensin bölgesinde tut (`LensRange`):
+  TELE = eşik+0.5 → max (15x→4x, geniş menzil, geçişsiz), MAIN = 1x → eşik-0.1.
+  Eşik kullanıcı tarafından canlı kalibre edilir (ayarlarda SeekBar).
+- Titreme nedenleri ve çözümleri: (1) ValueAnimator 120 Hz'de zoom isteği yağdırıyordu
+  → `ZoomSequencePlayer.emitZoom` ~30 Hz'e seyreltir; (2) zoom sırasında otomatik odak
+  "av"a çıkıyordu → çekimde odak+AE+AWB kilidi; (3) sabitleme → önizleme sabitlemesi
+  tercihli 3 kademeli fallback ile `bindCamera()`.
 - UI: buzlu cam (glass) paneller, çipler kodda üretilir (`buildChips`), XML'de boş
   `optionsRow`/`modeRow` konteynerleri var. Tek vurgu rengi `accentIce` (#9BE8FF).
 - minSdk 26, target/compile 34, CameraX 1.3.4, AGP 8.4.2, JDK 17 (CI).

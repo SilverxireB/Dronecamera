@@ -2,6 +2,8 @@ package com.dronecamera.app
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
@@ -10,22 +12,26 @@ import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.provider.MediaStore
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
-import android.widget.ImageView
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
@@ -48,6 +54,7 @@ import kotlin.math.pow
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private lateinit var prefs: SharedPreferences
 
     private var provider: ProcessCameraProvider? = null
     private var camera: Camera? = null
@@ -57,31 +64,25 @@ class MainActivity : AppCompatActivity() {
     private var sequencePlayer: ZoomSequencePlayer? = null
     private var countdownTimer: CountDownTimer? = null
 
-    // Kullanici secimleri
+    // --- Kullanici ayarlari (SharedPreferences'ta saklanir) ---
     private var mode = CameraMode.DRONE
+    private var lensRange = LensRange.TELE
     private var durationSec = 15
     private var zoomOut = true
     private var curve = ZoomCurve.CINEMATIC
     private var countdownSec = 0
+    private var lensThreshold = 3.5f
     private var lockExposure = true
-    private var singleLens = false
-    private var singleLensStartZoom = 3
+    private var stabilization = true
+    private var showGrid = false
     private var useFrontCamera = false
 
     private var isShotRunning = false
     private var isCountingDown = false
+    private var settingsOpen = false
 
-    // Dinamik olusturulan cip gorunumleri
-    private val modeChips = linkedMapOf<CameraMode, TextView>()
-    private val durationChips = linkedMapOf<Int, TextView>()
-    private val curveChips = linkedMapOf<ZoomCurve, TextView>()
-    private val countdownChips = linkedMapOf<Int, TextView>()
-    private val startZoomChips = linkedMapOf<Int, TextView>()
-    private lateinit var directionChip: TextView
-    private lateinit var durationLabel: TextView
-    private lateinit var curveLabel: TextView
-    private lateinit var countdownLabel: TextView
-    private lateinit var startZoomLabel: TextView
+    /** Secili durumu yeniden boyayan fonksiyonlar (cip gruplari). */
+    private val refreshers = mutableListOf<() -> Unit>()
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -99,9 +100,14 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        buildChips()
+        prefs = getSharedPreferences("drone_camera", Context.MODE_PRIVATE)
+        loadPrefs()
+
+        buildModeCarousel()
+        buildLensSegments()
+        buildSettingsSheet()
         setupControls()
-        updateUiForMode()
+        refreshAll()
 
         if (hasPermission(Manifest.permission.CAMERA)) {
             startCamera()
@@ -112,200 +118,350 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---------------------------------------------------------------- UI kurulum
+    // ---------------------------------------------------------------- Ayar saklama
+
+    private fun loadPrefs() {
+        mode = runCatching { CameraMode.valueOf(prefs.getString("mode", mode.name)!!) }
+            .getOrDefault(CameraMode.DRONE)
+        lensRange = runCatching { LensRange.valueOf(prefs.getString("lensRange", lensRange.name)!!) }
+            .getOrDefault(LensRange.TELE)
+        curve = runCatching { ZoomCurve.valueOf(prefs.getString("curve", curve.name)!!) }
+            .getOrDefault(ZoomCurve.CINEMATIC)
+        durationSec = prefs.getInt("durationSec", durationSec)
+        zoomOut = prefs.getBoolean("zoomOut", zoomOut)
+        countdownSec = prefs.getInt("countdownSec", countdownSec)
+        lensThreshold = prefs.getFloat("lensThreshold", lensThreshold)
+        lockExposure = prefs.getBoolean("lockExposure", lockExposure)
+        stabilization = prefs.getBoolean("stabilization", stabilization)
+        showGrid = prefs.getBoolean("showGrid", showGrid)
+    }
+
+    private fun savePrefs() {
+        prefs.edit()
+            .putString("mode", mode.name)
+            .putString("lensRange", lensRange.name)
+            .putString("curve", curve.name)
+            .putInt("durationSec", durationSec)
+            .putBoolean("zoomOut", zoomOut)
+            .putInt("countdownSec", countdownSec)
+            .putFloat("lensThreshold", lensThreshold)
+            .putBoolean("lockExposure", lockExposure)
+            .putBoolean("stabilization", stabilization)
+            .putBoolean("showGrid", showGrid)
+            .apply()
+    }
+
+    // ---------------------------------------------------------------- UI yardimcilari
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    private fun makeChip(text: String): TextView = TextView(this).apply {
-        this.text = text
+    private fun isBusy() = isShotRunning || isCountingDown
+
+    private fun haptic(view: View) =
+        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+
+    private fun setVisible(view: View, visible: Boolean) {
+        view.visibility = if (visible) View.VISIBLE else View.GONE
+    }
+
+    private fun makeChip(label: String): TextView = TextView(this).apply {
+        text = label
         textSize = 13f
-        setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textPrimary))
-        background = ContextCompat.getDrawable(this@MainActivity, R.drawable.chip_bg)
         setPadding(dp(14), dp(7), dp(14), dp(7))
         val lp = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
         )
-        lp.marginEnd = dp(6)
+        lp.marginEnd = dp(8)
         layoutParams = lp
     }
 
-    private fun makeLabel(textRes: Int): TextView = TextView(this).apply {
-        text = getString(textRes)
-        textSize = 12f
-        setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textSecondary))
-        val lp = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+    private fun styleChip(chip: TextView, selected: Boolean) {
+        chip.background = ContextCompat.getDrawable(
+            this, if (selected) R.drawable.chip_bg_selected else R.drawable.chip_bg
         )
-        lp.marginEnd = dp(6)
-        lp.marginStart = dp(8)
-        layoutParams = lp
+        chip.setTextColor(
+            ContextCompat.getColor(this, if (selected) R.color.textOnChip else R.color.textPrimary)
+        )
     }
 
-    private fun <K> markSelected(group: Map<K, TextView>, selected: K) {
-        group.forEach { (key, chip) ->
-            val isSel = key == selected
-            chip.background = ContextCompat.getDrawable(
-                this, if (isSel) R.drawable.chip_bg_selected else R.drawable.chip_bg
-            )
-            chip.setTextColor(
-                ContextCompat.getColor(this, if (isSel) R.color.textOnChip else R.color.textPrimary)
-            )
-        }
-    }
+    private fun refreshAll() = refreshers.forEach { it() }
 
-    private fun buildChips() {
-        // Mod seridi
-        CameraMode.values().forEach { m ->
-            val chip = makeChip(getString(m.labelRes))
+    /** Baslik + yatay cip grubu ekler ve secim boyamasini kaydeder. */
+    private fun <T> addChipRow(
+        container: LinearLayout,
+        titleRes: Int,
+        items: List<Pair<T, String>>,
+        current: () -> T,
+        onSelect: (T) -> Unit
+    ) {
+        container.addView(TextView(this).apply {
+            text = getString(titleRes)
+            textSize = 11f
+            letterSpacing = 0.12f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textTertiary))
+            setPadding(dp(4), dp(14), 0, dp(8))
+        })
+
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val chips = items.map { (key, label) ->
+            val chip = makeChip(label)
             chip.setOnClickListener {
-                if (isShotRunning || isCountingDown || mode == m) return@setOnClickListener
+                if (isBusy()) return@setOnClickListener
+                haptic(chip)
+                onSelect(key)
+                savePrefs()
+                refreshAll()
+            }
+            row.addView(chip)
+            key to chip
+        }
+        container.addView(HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(row)
+        })
+        refreshers += { chips.forEach { (key, chip) -> styleChip(chip, key == current()) } }
+    }
+
+    private fun addSwitchRow(
+        container: LinearLayout,
+        titleRes: Int,
+        summaryRes: Int,
+        current: () -> Boolean,
+        onChange: (Boolean) -> Unit
+    ) {
+        val wrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(12), dp(4), dp(4))
+        }
+        val texts = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        texts.addView(TextView(this).apply {
+            text = getString(titleRes)
+            textSize = 14f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textPrimary))
+        })
+        texts.addView(TextView(this).apply {
+            text = getString(summaryRes)
+            textSize = 11f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textTertiary))
+        })
+        val toggle = SwitchCompat(this).apply { isChecked = current() }
+        toggle.setOnCheckedChangeListener { view, checked ->
+            if (isBusy()) return@setOnCheckedChangeListener
+            haptic(view)
+            onChange(checked)
+            savePrefs()
+        }
+        wrapper.addView(texts)
+        wrapper.addView(toggle)
+        container.addView(wrapper)
+        refreshers += { toggle.isChecked = current() }
+    }
+
+    // ---------------------------------------------------------------- Menu kurulumu
+
+    private fun buildModeCarousel() {
+        val chips = CameraMode.values().map { m ->
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = android.view.Gravity.CENTER_HORIZONTAL
+                setPadding(dp(12), dp(6), dp(12), dp(2))
+            }
+            val label = TextView(this).apply {
+                text = getString(m.labelRes)
+                textSize = 12f
+                letterSpacing = 0.08f
+            }
+            val dot = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(5), dp(5)).also { it.topMargin = dp(6) }
+                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.mode_dot)
+            }
+            item.addView(label)
+            item.addView(dot)
+            item.setOnClickListener {
+                if (isBusy() || mode == m) return@setOnClickListener
+                haptic(item)
                 mode = m
-                updateUiForMode()
+                savePrefs()
+                applyModeToUi()
+                refreshAll()
                 bindCamera()
             }
-            binding.modeRow.addView(chip)
-            modeChips[m] = chip
+            binding.modeRow.addView(item)
+            Triple(m, label, dot)
         }
-
-        // Sure
-        durationLabel = makeLabel(R.string.label_duration)
-        binding.optionsRow.addView(durationLabel)
-        intArrayOf(10, 15, 20, 30).forEach { sec ->
-            val chip = makeChip(getString(R.string.duration_fmt, sec))
-            chip.setOnClickListener {
-                if (isShotRunning || isCountingDown) return@setOnClickListener
-                durationSec = sec
-                markSelected(durationChips, sec)
+        refreshers += {
+            chips.forEach { (m, label, dot) ->
+                val selected = m == mode
+                label.setTextColor(
+                    ContextCompat.getColor(
+                        this, if (selected) R.color.textPrimary else R.color.textTertiary
+                    )
+                )
+                label.alpha = if (selected) 1f else 0.75f
+                dot.visibility = if (selected) View.VISIBLE else View.INVISIBLE
             }
-            binding.optionsRow.addView(chip)
-            durationChips[sec] = chip
         }
+    }
 
-        // Yon
-        directionChip = makeChip(getString(R.string.dir_out))
-        directionChip.setOnClickListener {
-            if (isShotRunning || isCountingDown) return@setOnClickListener
-            zoomOut = !zoomOut
-            directionChip.text = getString(if (zoomOut) R.string.dir_out else R.string.dir_in)
-        }
-        binding.optionsRow.addView(directionChip)
-
-        // Hiz egrisi
-        curveLabel = makeLabel(R.string.label_curve)
-        binding.optionsRow.addView(curveLabel)
-        listOf(
-            ZoomCurve.CINEMATIC to R.string.curve_cinematic,
-            ZoomCurve.LINEAR to R.string.curve_linear,
-            ZoomCurve.AGGRESSIVE to R.string.curve_aggressive
-        ).forEach { (c, res) ->
-            val chip = makeChip(getString(res))
+    /** Lens menzili: cekimin en belirleyici ayari, bu yuzden ana ekranda. */
+    private fun buildLensSegments() {
+        val segments = LensRange.values().map { range ->
+            val chip = makeChip(getString(range.labelRes))
             chip.setOnClickListener {
-                if (isShotRunning || isCountingDown) return@setOnClickListener
-                curve = c
-                markSelected(curveChips, c)
+                if (isBusy()) return@setOnClickListener
+                haptic(chip)
+                lensRange = range
+                savePrefs()
+                refreshAll()
+                applyStartZoom()
             }
-            binding.optionsRow.addView(chip)
-            curveChips[c] = chip
+            binding.lensRow.addView(chip)
+            range to chip
         }
+        refreshers += {
+            segments.forEach { (range, chip) -> styleChip(chip, range == lensRange) }
+        }
+    }
 
-        // Geri sayim
-        countdownLabel = makeLabel(R.string.label_countdown)
-        binding.optionsRow.addView(countdownLabel)
-        listOf(
-            0 to R.string.countdown_off,
-            3 to R.string.countdown_3,
-            10 to R.string.countdown_10
-        ).forEach { (sec, res) ->
-            val chip = makeChip(getString(res))
-            chip.setOnClickListener {
-                if (isShotRunning || isCountingDown) return@setOnClickListener
-                countdownSec = sec
-                markSelected(countdownChips, sec)
+    private fun buildSettingsSheet() {
+        val content = binding.settingsContent
+
+        addChipRow(
+            content, R.string.label_duration,
+            listOf(8, 10, 15, 20, 30).map { it to getString(R.string.duration_fmt, it) },
+            { durationSec }, { durationSec = it }
+        )
+        addChipRow(
+            content, R.string.label_direction,
+            listOf(true to getString(R.string.dir_out), false to getString(R.string.dir_in)),
+            { zoomOut }, { zoomOut = it }
+        )
+        addChipRow(
+            content, R.string.label_curve,
+            ZoomCurve.values().map { it to getString(it.labelRes) },
+            { curve }, { curve = it }
+        )
+        addChipRow(
+            content, R.string.label_countdown,
+            listOf(
+                0 to getString(R.string.countdown_off),
+                3 to getString(R.string.countdown_3),
+                10 to getString(R.string.countdown_10)
+            ),
+            { countdownSec }, { countdownSec = it }
+        )
+
+        addThresholdRow(content)
+
+        addSwitchRow(
+            content, R.string.opt_lock_title, R.string.opt_lock_summary,
+            { lockExposure }, { lockExposure = it }
+        )
+        addSwitchRow(
+            content, R.string.opt_stab_title, R.string.opt_stab_summary,
+            { stabilization }, { stabilization = it; bindCamera() }
+        )
+        addSwitchRow(
+            content, R.string.opt_grid_title, R.string.opt_grid_summary,
+            { showGrid }, { showGrid = it; binding.gridGroup.visibility = gridVisibility() }
+        )
+    }
+
+    /**
+     * Lens esigi kalibrasyonu: kaydirici oynatildikca onizleme o zoom degerine
+     * gider, boylece kullanici goruntunun sicradigi noktayi kendi gozuyle
+     * bulup esigi tam oraya ayarlar.
+     */
+    private fun addThresholdRow(container: LinearLayout) {
+        container.addView(TextView(this).apply {
+            text = getString(R.string.label_threshold)
+            textSize = 11f
+            letterSpacing = 0.12f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textTertiary))
+            setPadding(dp(4), dp(18), 0, dp(2))
+        })
+        val value = TextView(this).apply {
+            textSize = 13f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accentIce))
+            setPadding(dp(4), 0, 0, dp(2))
+        }
+        container.addView(value)
+        container.addView(TextView(this).apply {
+            text = getString(R.string.threshold_help)
+            textSize = 11f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textTertiary))
+            setPadding(dp(4), 0, 0, dp(6))
+        })
+
+        val bar = SeekBar(this).apply {
+            max = 60 // 2.0x .. 8.0x, 0.1'lik adimlar
+            progress = ((lensThreshold - 2f) * 10f).toInt().coerceIn(0, 60)
+        }
+        bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                lensThreshold = 2f + progress / 10f
+                value.text = getString(R.string.zoom_format, lensThreshold)
+                // Canli kalibrasyon: onizlemeyi tam esik degerine goturur.
+                if (fromUser && !isBusy()) camera?.cameraControl?.setZoomRatio(lensThreshold)
             }
-            binding.optionsRow.addView(chip)
-            countdownChips[sec] = chip
-        }
 
-        // Tek lens modunda baslangic zoom secimi. Lens degisim esigi cihaza
-        // gore degisir (Honor Magic 8 Pro'da ~3.5x); esigin altinda kalan bir
-        // baslangic secilirse cekim boyunca hic lens gecisi olmaz.
-        startZoomLabel = makeLabel(R.string.label_start_zoom)
-        binding.optionsRow.addView(startZoomLabel)
-        intArrayOf(2, 3, 4, 6, 8).forEach { z ->
-            val chip = makeChip(getString(R.string.start_zoom_fmt, z))
-            chip.setOnClickListener {
-                if (isShotRunning || isCountingDown) return@setOnClickListener
-                singleLensStartZoom = z
-                markSelected(startZoomChips, z)
-            }
-            binding.optionsRow.addView(chip)
-            startZoomChips[z] = chip
-        }
-
-        markSelected(modeChips, mode)
-        markSelected(durationChips, durationSec)
-        markSelected(curveChips, curve)
-        markSelected(countdownChips, countdownSec)
-        markSelected(startZoomChips, singleLensStartZoom)
+            override fun onStartTrackingTouch(sb: SeekBar?) = Unit
+            override fun onStopTrackingTouch(sb: SeekBar?) = savePrefs()
+        })
+        container.addView(bar)
+        value.text = getString(R.string.zoom_format, lensThreshold)
+        refreshers += { value.text = getString(R.string.zoom_format, lensThreshold) }
     }
 
     private fun setupControls() {
-        binding.shutterButton.setOnClickListener { onShutter() }
-
-        binding.btnLock.setOnClickListener {
-            if (isShotRunning || isCountingDown) return@setOnClickListener
-            lockExposure = !lockExposure
-            updateToggleTints()
+        binding.shutterButton.setOnClickListener {
+            haptic(it)
+            onShutter()
         }
-        binding.btnLens.setOnClickListener {
-            if (isShotRunning || isCountingDown) return@setOnClickListener
-            singleLens = !singleLens
-            updateToggleTints()
-            updateUiForMode()
-            bindCamera()
+        binding.btnSettings.setOnClickListener {
+            haptic(it)
+            toggleSettings(!settingsOpen)
         }
+        binding.btnCloseSettings.setOnClickListener {
+            haptic(it)
+            toggleSettings(false)
+        }
+        binding.settingsScrim.setOnClickListener { toggleSettings(false) }
         binding.btnFlip.setOnClickListener {
-            if (isShotRunning || isCountingDown) return@setOnClickListener
+            if (isBusy()) return@setOnClickListener
+            haptic(it)
             useFrontCamera = !useFrontCamera
             bindCamera()
         }
-        updateToggleTints()
+        applyModeToUi()
     }
 
-    private fun updateToggleTints() {
-        val active = ContextCompat.getColor(this, R.color.accentIce)
-        val idle = ContextCompat.getColor(this, R.color.textSecondary)
-        binding.btnLock.setColorFilter(if (lockExposure) active else idle)
-        binding.btnLens.setColorFilter(if (singleLens) active else idle)
-        binding.btnFlip.setColorFilter(idle)
-        binding.btnLock.alpha = if (lockExposure) 1f else 0.55f
-        binding.btnLens.alpha = if (singleLens) 1f else 0.55f
+    private fun toggleSettings(open: Boolean) {
+        if (isBusy() && open) return
+        settingsOpen = open
+        setVisible(binding.settingsSheet, open)
+        setVisible(binding.settingsScrim, open)
+        if (!open) applyStartZoom()
     }
 
-    private fun updateUiForMode() {
-        markSelected(modeChips, mode)
+    private fun gridVisibility() = if (showGrid) View.VISIBLE else View.GONE
 
-        val zoomMode = mode.isZoomMode
-        val showCurve = mode == CameraMode.DRONE ||
-            mode == CameraMode.BOOMERANG || mode == CameraMode.DRONIE
-
-        setVisible(durationLabel, zoomMode)
-        durationChips.values.forEach { setVisible(it, zoomMode) }
-        setVisible(directionChip, zoomMode && mode != CameraMode.VERTIGO)
-        setVisible(curveLabel, showCurve)
-        curveChips.values.forEach { setVisible(it, showCurve) }
-
-        setVisible(binding.btnLens, zoomMode && !mode.usesFrontCamera)
-        val showStartZoom = singleLens && zoomMode && !mode.usesFrontCamera &&
-            mode != CameraMode.VERTIGO
-        setVisible(startZoomLabel, showStartZoom)
-        startZoomChips.values.forEach { setVisible(it, showStartZoom) }
+    /** Moda gore hangi kontrollerin gorunecegini ayarlar. */
+    private fun applyModeToUi() {
+        setVisible(binding.lensRow, mode.allowsLensRange)
         setVisible(binding.btnFlip, mode == CameraMode.PHOTO || mode == CameraMode.VIDEO)
-        setVisible(binding.btnLock, mode.recordsVideo)
+        binding.gridGroup.visibility = gridVisibility()
 
         when (mode) {
             CameraMode.VERTIGO -> showGuide(R.string.vertigo_guide)
             CameraMode.DRONIE -> showGuide(R.string.dronie_guide)
+            CameraMode.DRONE, CameraMode.BOOMERANG, CameraMode.STEP ->
+                if (lensRange == LensRange.FULL) showGuide(R.string.full_range_warning)
+                else binding.guideText.visibility = View.GONE
             else -> binding.guideText.visibility = View.GONE
         }
     }
@@ -313,10 +469,6 @@ class MainActivity : AppCompatActivity() {
     private fun showGuide(textRes: Int) {
         binding.guideText.text = getString(textRes)
         binding.guideText.visibility = View.VISIBLE
-    }
-
-    private fun setVisible(view: View, visible: Boolean) {
-        view.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
     private fun hasPermission(permission: String): Boolean =
@@ -332,58 +484,76 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    /**
+     * Kullanim durumlarini baglar. Sabitleme destegi cihaza gore degistigi icin
+     * once onizleme sabitlemesi (en akici), sonra video sabitlemesi, en son
+     * sabitlemesiz deneme yapilir.
+     */
     private fun bindCamera() {
         val provider = this.provider ?: return
+        val selector = chooseCameraSelector(provider)
+        val attempts = if (stabilization) listOf(2, 1, 0) else listOf(0)
 
-        val preview = Preview.Builder().build().also {
-            it.setSurfaceProvider(binding.previewView.surfaceProvider)
-        }
-
-        try {
-            provider.unbindAll()
-            camera = if (mode == CameraMode.PHOTO) {
-                val capture = ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+        for (level in attempts) {
+            try {
+                provider.unbindAll()
+                val preview = Preview.Builder()
+                    .apply { if (level == 2) setPreviewStabilizationEnabled(true) }
                     .build()
-                imageCapture = capture
-                videoCapture = null
-                provider.bindToLifecycle(this, chooseCameraSelector(provider), preview, capture)
-            } else {
-                val recorder = Recorder.Builder()
-                    .setQualitySelector(
-                        QualitySelector.fromOrderedList(
-                            listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
+                    .also { it.setSurfaceProvider(binding.previewView.surfaceProvider) }
+
+                camera = if (mode == CameraMode.PHOTO) {
+                    val capture = ImageCapture.Builder()
+                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                        .build()
+                    imageCapture = capture
+                    videoCapture = null
+                    provider.bindToLifecycle(this, selector, preview, capture)
+                } else {
+                    val recorder = Recorder.Builder()
+                        .setQualitySelector(
+                            QualitySelector.fromOrderedList(
+                                listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
+                            )
                         )
-                    )
-                    .build()
-                val capture = VideoCapture.withOutput(recorder)
-                imageCapture = null
-                videoCapture = capture
-                provider.bindToLifecycle(this, chooseCameraSelector(provider), preview, capture)
+                        .build()
+                    val capture = VideoCapture.Builder(recorder)
+                        .apply { if (level == 1) setVideoStabilizationEnabled(true) }
+                        .build()
+                    imageCapture = null
+                    videoCapture = capture
+                    provider.bindToLifecycle(this, selector, preview, capture)
+                }
+                observeZoom()
+                applyCaptureOptions(locked = false)
+                applyStartZoom()
+                return
+            } catch (e: Exception) {
+                if (level == attempts.last()) {
+                    Toast.makeText(
+                        this, getString(R.string.camera_error, e.message), Toast.LENGTH_LONG
+                    ).show()
+                }
             }
-            observeZoom()
-            applyCaptureOptions(lockAeAwb = false)
-            camera?.cameraControl?.setZoomRatio(
-                max(1f, camera?.cameraInfo?.zoomState?.value?.minZoomRatio ?: 1f)
-            )
-        } catch (e: Exception) {
-            Toast.makeText(this, getString(R.string.camera_error, e.message), Toast.LENGTH_LONG).show()
         }
     }
 
     /**
-     * Tek lens modunda cok lensli (logical) olmayan gercek fiziksel ana arka
-     * kamera secilir; zoom tamamen dijital olur ve lens gecisi hic yasanmaz.
-     * Cihaz boyle bir kamerayi acmiyorsa varsayilan kameraya donulur.
+     * Tek lens modunda cok lensli (logical) olmayan gercek fiziksel arka kamera
+     * aranir. Cihaz bunu uygulamalara acmiyorsa (Honor boyle) varsayilan
+     * kameraya donulur; lens gecisi bu durumda zoom araligini tek bir lensin
+     * bolgesinde tutarak engellenir (bkz. resolveZoomRange).
      */
     @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
     private fun chooseCameraSelector(provider: ProcessCameraProvider): CameraSelector {
         val wantsFront = mode.usesFrontCamera ||
             (useFrontCamera && (mode == CameraMode.PHOTO || mode == CameraMode.VIDEO))
         if (wantsFront) return CameraSelector.DEFAULT_FRONT_CAMERA
-        if (!singleLens || !mode.isZoomMode) return CameraSelector.DEFAULT_BACK_CAMERA
+        if (!lensRange.isSingleLens || !mode.allowsLensRange) {
+            return CameraSelector.DEFAULT_BACK_CAMERA
+        }
 
-        val mainPhysical = provider.availableCameraInfos.firstOrNull { info ->
+        val physical = provider.availableCameraInfos.firstOrNull { info ->
             val c2 = Camera2CameraInfo.from(info)
             val facing = c2.getCameraCharacteristic(CameraCharacteristics.LENS_FACING)
             val capabilities = c2.getCameraCharacteristic(
@@ -392,16 +562,14 @@ class MainActivity : AppCompatActivity() {
             val isLogical = capabilities?.contains(
                 CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA
             ) == true
-            facing == CameraCharacteristics.LENS_FACING_BACK &&
-                !isLogical &&
+            facing == CameraCharacteristics.LENS_FACING_BACK && !isLogical &&
                 info.intrinsicZoomRatio in 0.95f..1.05f
         } ?: return CameraSelector.DEFAULT_BACK_CAMERA
 
-        val targetId = Camera2CameraInfo.from(mainPhysical).cameraId
+        val targetId = Camera2CameraInfo.from(physical).cameraId
         return CameraSelector.Builder()
             .addCameraFilter { infos ->
-                infos.filter { Camera2CameraInfo.from(it).cameraId == targetId }
-                    .ifEmpty { infos }
+                infos.filter { Camera2CameraInfo.from(it).cameraId == targetId }.ifEmpty { infos }
             }
             .build()
     }
@@ -412,37 +580,76 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Onizlemeyi cekimin baslayacagi zoom degerine goturur (kadraj icin). */
+    private fun applyStartZoom() {
+        if (isBusy()) return
+        val range = resolveZoomRange() ?: return
+        camera?.cameraControl?.setZoomRatio(range.first)
+        applyModeToUi()
+    }
+
     /**
-     * Lens gecislerindeki ani parlaklik/renk sicramalarini azaltmak icin
-     * cekim boyunca AE ve AWB kilitlenir; EIS her zaman aciktir.
+     * Cekim boyunca pozlama, renk ve odagi sabitler. Zoom sirasinda otomatik
+     * odagin "av"a cikmasi goruntude nefes alma/titreme yaratir; kilit bunu
+     * engeller. EIS her zaman aciktir.
      */
     @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
-    private fun applyCaptureOptions(lockAeAwb: Boolean) {
+    private fun applyCaptureOptions(locked: Boolean) {
         val cameraControl = camera?.cameraControl ?: return
         val options = CaptureRequestOptions.Builder()
             .setCaptureRequestOption(
                 CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                if (stabilization) CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                else CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
             )
-            .setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, lockAeAwb)
-            .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, lockAeAwb)
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, locked)
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, locked)
             .build()
         Camera2CameraControl.from(cameraControl).setCaptureRequestOptions(options)
+
+        if (locked) {
+            // Merkeze odaklanip kilitle; otomatik iptal kapali.
+            runCatching {
+                val point = binding.previewView.meteringPointFactory.createPoint(0.5f, 0.5f)
+                cameraControl.startFocusAndMetering(
+                    FocusMeteringAction.Builder(
+                        point,
+                        FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+                    ).disableAutoCancel().build()
+                )
+            }
+        } else {
+            runCatching { cameraControl.cancelFocusAndMetering() }
+        }
     }
 
     // ---------------------------------------------------------------- Zoom sekanslari
 
-    /** Modun hedef zoom araligini cihazin sinirlarina kirparak dondurur. */
+    /**
+     * Modun ve secili lens menzilinin hedef zoom araligini, cihazin
+     * sinirlarina kirparak dondurur.
+     *
+     * TELE ve MAIN araliklari esigin iki yaninda kalir; boylece cekim boyunca
+     * tek lens kullanilir ve gecis sicramasi olmaz.
+     */
     private fun resolveZoomRange(): Pair<Float, Float>? {
         val state = camera?.cameraInfo?.zoomState?.value ?: return null
-        val (targetStart, targetEnd) = when (mode) {
-            CameraMode.VERTIGO -> 2f to 1f
-            CameraMode.DRONIE -> min(2.5f, state.maxZoomRatio) to state.minZoomRatio
-            else -> if (singleLens) singleLensStartZoom.toFloat() to 1f else 15f to 0.5f
+        val deviceMin = state.minZoomRatio
+        val deviceMax = state.maxZoomRatio
+
+        val (rawStart, rawEnd) = when (mode) {
+            CameraMode.VERTIGO -> min(lensThreshold - 0.1f, deviceMax) to 1f
+            CameraMode.DRONIE -> min(2.5f, deviceMax) to deviceMin
+            else -> when (lensRange) {
+                LensRange.TELE -> deviceMax to min(lensThreshold + 0.5f, deviceMax)
+                LensRange.MAIN -> min(lensThreshold - 0.1f, deviceMax) to 1f
+                LensRange.FULL -> deviceMax to deviceMin
+            }
         }
-        val start = min(targetStart, state.maxZoomRatio)
-        val end = max(targetEnd, state.minZoomRatio)
-        return if (zoomOut || mode == CameraMode.VERTIGO) start to end else end to start
+        val start = rawStart.coerceIn(deviceMin, deviceMax)
+        val end = rawEnd.coerceIn(deviceMin, deviceMax)
+        val forward = zoomOut || mode == CameraMode.VERTIGO
+        return if (forward) start to end else end to start
     }
 
     private fun curveInterpolator() = when (curve) {
@@ -455,9 +662,9 @@ class MainActivity : AppCompatActivity() {
         val total = durationSec * 1000L
         return when (mode) {
             CameraMode.DRONE, CameraMode.DRONIE -> listOf(
-                ZoomSegment.Hold(startZoom, 700),
+                ZoomSegment.Hold(startZoom, 800),
                 ZoomSegment.Ramp(startZoom, endZoom, total, curveInterpolator()),
-                ZoomSegment.Hold(endZoom, 700)
+                ZoomSegment.Hold(endZoom, 800)
             )
             CameraMode.BOOMERANG -> listOf(
                 ZoomSegment.Hold(startZoom, 500),
@@ -477,7 +684,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Geometrik araliklarla 4 kademeli, duraklamali zoom (hyper zoom). */
-    private fun buildStepSequence(startZoom: Float, endZoom: Float, totalMs: Long): List<ZoomSegment> {
+    private fun buildStepSequence(
+        startZoom: Float,
+        endZoom: Float,
+        totalMs: Long
+    ): List<ZoomSegment> {
         val levels = 4
         val zooms = (0 until levels).map { i ->
             (startZoom * (endZoom / startZoom).toDouble().pow(i / (levels - 1.0))).toFloat()
@@ -503,13 +714,15 @@ class MainActivity : AppCompatActivity() {
             stopShot()
             return
         }
+        if (settingsOpen) toggleSettings(false)
+
         when (mode) {
             CameraMode.PHOTO -> withCountdown { takePhoto() }
             CameraMode.VIDEO -> withCountdown { startRecording(null) }
             else -> {
-                val (start, end) = resolveZoomRange() ?: return
-                camera?.cameraControl?.setZoomRatio(start)
-                withCountdown { startRecording(buildSequence(start, end)) }
+                val range = resolveZoomRange() ?: return
+                camera?.cameraControl?.setZoomRatio(range.first)
+                withCountdown { startRecording(buildSequence(range.first, range.second)) }
             }
         }
     }
@@ -561,8 +774,9 @@ class MainActivity : AppCompatActivity() {
             output,
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    Toast.makeText(this@MainActivity, R.string.photo_saved, Toast.LENGTH_SHORT).show()
+                override fun onImageSaved(results: ImageCapture.OutputFileResults) {
+                    Toast.makeText(this@MainActivity, R.string.photo_saved, Toast.LENGTH_SHORT)
+                        .show()
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -599,7 +813,7 @@ class MainActivity : AppCompatActivity() {
                 is VideoRecordEvent.Start -> {
                     isShotRunning = true
                     setRecordingUi(true)
-                    if (lockExposure) applyCaptureOptions(lockAeAwb = true)
+                    if (lockExposure) applyCaptureOptions(locked = true)
                     if (sequence != null) {
                         sequencePlayer = ZoomSequencePlayer(
                             segments = sequence,
@@ -613,11 +827,12 @@ class MainActivity : AppCompatActivity() {
                 }
                 is VideoRecordEvent.Status -> {
                     val sec = event.recordingStats.recordedDurationNanos / 1_000_000_000
-                    binding.recTimer.text = String.format(Locale.US, "%02d:%02d", sec / 60, sec % 60)
+                    binding.recTimer.text =
+                        String.format(Locale.US, "%02d:%02d", sec / 60, sec % 60)
                 }
                 is VideoRecordEvent.Finalize -> {
                     isShotRunning = false
-                    applyCaptureOptions(lockAeAwb = false)
+                    applyCaptureOptions(locked = false)
                     setRecordingUi(false)
                     if (event.hasError()) {
                         Toast.makeText(
@@ -647,8 +862,11 @@ class MainActivity : AppCompatActivity() {
         binding.recTimer.text = getString(R.string.timer_zero)
         binding.progressBar.progress = 0
         setVisible(binding.progressBar, recording && mode.isZoomMode)
-        binding.optionsScroll.alpha = if (recording) 0.4f else 1f
-        binding.modeScroll.alpha = if (recording) 0.4f else 1f
+        binding.modeScroll.alpha = if (recording) 0.35f else 1f
+        binding.lensRow.alpha = if (recording) 0.35f else 1f
+        binding.btnSettings.alpha = if (recording) 0.35f else 1f
+        binding.btnFlip.alpha = if (recording) 0.35f else 1f
+        if (recording) binding.guideText.visibility = View.GONE else applyModeToUi()
     }
 
     override fun onDestroy() {

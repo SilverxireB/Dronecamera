@@ -2,9 +2,10 @@
 <resources>
     <color name="textPrimary">#FFFFFF</color>
     <color name="textSecondary">#B3FFFFFF</color>
-    <color name="textOnChip">#0E1114</color>
+    <color name="textTertiary">#80FFFFFF</color>
+    <color name="textOnChip">#0B0D10</color>
     <color name="accentIce">#9BE8FF</color>
     <color name="recording">#FF5252</color>
+    <color name="gridLine">#33FFFFFF</color>
     <color name="icon_bg">#101820</color>
-    <color name="accent">#00E5A0</color>
 </resources>
