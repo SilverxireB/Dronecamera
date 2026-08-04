@@ -29,10 +29,17 @@ Bölge başlıklarıyla gezin (`// ---- ...` yorum satırları):
 `CameraMode` (PHOTO/VIDEO/DRONE/BOOMERANG/STEP/VERTIGO/DRONIE) +
 `isZoomMode/usesFrontCamera/recordsVideo/allowsLensRange`.
 
-### ZoomSequence.kt (~110 satır)
-`ZoomSegment` (Ramp: logaritmik uzayda eased; Hold) ve `ZoomSequencePlayer`.
-ÖNEMLİ: `emitZoom()` istekleri ~30 Hz'e seyreltir (MIN_INTERVAL_MS/MIN_ZOOM_STEP) —
-titreme çözümünün kalbi, dokunurken dikkat.
+### ZoomSequence.kt (~140 satır)
+`ZoomSegment` (Ramp: logaritmik uzayda eased; Hold), `List<ZoomSegment>.zoomAt(ms)`
+(herhangi bir andaki tam değer — yazılım kırpması her karede bunu çağırır) ve
+`ZoomSequencePlayer`. ÖNEMLİ: `emitZoom()` optik istekleri ~30 Hz'e seyreltir
+(MIN_INTERVAL_MS/MIN_ZOOM_STEP) — titreme çözümünün kalbi, dokunurken dikkat.
+
+### ZoomSurfaceProcessor.kt (~330 satır)
+Donanım zoom tavanının (bu cihazda 10x) üstünü sağlayan GPU kırpma hattı.
+`SurfaceProcessor` uygular; kareleri OES dokusundan alıp kırpılmış olarak hem
+önizlemeye hem kayda çizer. `zoomProvider` ayarlıysa değer her kare için oradan
+okunur (akıcılığın kaynağı). `SoftZoomEffect` = CameraEffect sarmalayıcısı.
 
 ## Kaynaklar (app/src/main/res/)
 

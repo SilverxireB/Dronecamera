@@ -50,6 +50,14 @@ video çekimleri yapar. Kullanıcı dili: Türkçe. Cihaz: Honor Magic 8 Pro
   debug+release aynı anahtarla imzalanır ki güncellemeler üzerine kurulabilsin.
   Bilinçli karar (kişisel yan-yükleme uygulaması, Play'e çıkmayacak) — değiştirme.
 
+- Cihaz uygulamalara TEK arka kamera ve 10x tavan veriyor (teşhisle doğrulandı;
+  Honor'un 15x'i kendi yazılım büyütmesi). 10x üstü `ZoomSurfaceProcessor` ile
+  GPU kırpmasından geliyor: efektif zoom = optik × yazılım kırpması.
+- Akıcılığın anahtarı: "Akıcı" motorda optik zoom çekim boyunca SABİT kalır,
+  rampanın tamamı kırpmayla yapılır ve değer HER KAREDE hesaplanır
+  (`zoomProvider`). Donanımın kademeli zoom adımları böylece hiç devreye girmez.
+- Yazılım zoom açıkken kayıt 4K; 1080p'ye kırparken 2 kata kadar kayıpsız.
+
 ## Bekleyen fikirler
 
 Timelapse+zoom, zoom sırasında foto serisi, slow-motion, özne takibi (ML Kit).

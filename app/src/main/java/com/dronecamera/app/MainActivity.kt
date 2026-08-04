@@ -230,6 +230,8 @@ class MainActivity : AppCompatActivity() {
                 onSelect(key)
                 savePrefs()
                 refreshAll()
+                // Secim onizlemeye hemen yansisin (ikinci dokunus gerekmesin).
+                applyStartZoom()
             }
             row.addView(chip)
             key to chip
@@ -415,6 +417,10 @@ class MainActivity : AppCompatActivity() {
         return if (mode.allowsLensRange) opticalCeiling(lensRange, deviceMax) else deviceMax
     }
 
+    private fun updateZoomBadge(effective: Float) {
+        binding.zoomText.text = getString(R.string.zoom_format, effective)
+    }
+
     /** Istenen efektif zoom'u optik + yazilimsal kirpma olarak ikiye boler. */
     private fun applyEffectiveZoom(effective: Float) {
         val ceiling = currentOpticalCeiling()
@@ -423,6 +429,9 @@ class MainActivity : AppCompatActivity() {
         camera?.cameraControl?.setZoomRatio(optical)
         softZoomLevel = (effective / optical).coerceAtLeast(1f)
         zoomProcessor?.zoom = softZoomLevel
+        // Rozet dogrudan burada guncellenir: optik deger ayni kalip yalnizca
+        // yazilim kirpmasi degistiginde zoom gozlemcisi tetiklenmiyor.
+        updateZoomBadge(effective)
     }
 
     private fun buildSettingsSheet() {
@@ -488,21 +497,6 @@ class MainActivity : AppCompatActivity() {
             { showGrid }, { showGrid = it; binding.gridGroup.visibility = gridVisibility() }
         )
 
-        // Cihazin uygulamalara actigi kamera ve zoom sinirlarini gosteren teshis.
-        content.addView(TextView(this).apply {
-            text = getString(R.string.label_diagnostics)
-            textSize = 11f
-            letterSpacing = 0.12f
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textTertiary))
-            setPadding(dp(4), dp(20), 0, dp(6))
-        })
-        val diag = TextView(this).apply {
-            textSize = 11f
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textSecondary))
-            setPadding(dp(4), 0, 0, dp(4))
-        }
-        content.addView(diag)
-        refreshers += { diag.text = cameraDiagnostics() }
     }
 
     /**
@@ -774,8 +768,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val zoomObserver = Observer<ZoomState> { state ->
-        binding.zoomText.text =
-            getString(R.string.zoom_format, state.zoomRatio * softZoomLevel)
+        updateZoomBadge(state.zoomRatio * softZoomLevel)
         updateLensLabels()
         // Zoom durumu baglanmadan hemen sonra hazir olmayabiliyor; baslangic
         // zoom'unu ilk gecerli deger gelince uygula.
@@ -790,38 +783,6 @@ class MainActivity : AppCompatActivity() {
         val live = camera?.cameraInfo?.zoomState ?: return
         observedZoom = live
         live.observe(this, zoomObserver)
-    }
-
-    /**
-     * Cihazin uygulamalara hangi kameralari ve zoom araliklarini actigini
-     * gosterir. Honor kendi uygulamasinda 15x'e cikarken CameraX'e daha dusuk
-     * bir tavan bildirebiliyor; bu satir farki gormemizi saglar.
-     */
-    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
-    private fun cameraDiagnostics(): String {
-        val provider = this.provider ?: return "…"
-        return provider.availableCameraInfos.joinToString("\n") { info ->
-            val c2 = Camera2CameraInfo.from(info)
-            val facing = when (c2.getCameraCharacteristic(CameraCharacteristics.LENS_FACING)) {
-                CameraCharacteristics.LENS_FACING_BACK -> "arka"
-                CameraCharacteristics.LENS_FACING_FRONT -> "ön"
-                else -> "?"
-            }
-            val zoom = info.zoomState.value
-            val ratioRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                runCatching {
-                    c2.getCameraCharacteristic(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                }.getOrNull()
-            } else null
-            val digital = runCatching {
-                c2.getCameraCharacteristic(
-                    CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM
-                )
-            }.getOrNull()
-            "#${c2.cameraId} $facing · temel ${fmtZoom(info.intrinsicZoomRatio)}x · " +
-                "CameraX ${fmtZoom(zoom?.minZoomRatio ?: 0f)}-${fmtZoom(zoom?.maxZoomRatio ?: 0f)}x · " +
-                "HAL ${ratioRange?.lower ?: "-"}-${ratioRange?.upper ?: "-"} · dij ${digital ?: "-"}"
-        }
     }
 
     /** Onizlemeyi cekimin baslayacagi zoom degerine goturur (kadraj icin). */
@@ -1122,7 +1083,7 @@ class MainActivity : AppCompatActivity() {
         sequencePlayer = ZoomSequencePlayer(
             segments = sequence,
             setZoom = { effective ->
-                binding.zoomText.text = getString(R.string.zoom_format, effective)
+                updateZoomBadge(effective)
                 if (!useSoftwareRamp) applyEffectiveZoom(effective)
             },
             onProgress = { fraction, _ ->
