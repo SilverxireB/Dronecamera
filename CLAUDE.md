@@ -28,7 +28,11 @@ video çekimleri yapar. Kullanıcı dili: Türkçe. Cihaz: Honor Magic 8 Pro
 - Lens geçişi sıçramalarına karşı: çekimde AE/AWB kilidi + EIS (`applyCaptureOptions`).
 - Honor fiziksel kamerayı uygulamalara AÇMIYOR → tek lens modu mantıksal kameraya
   düşer. ÇÖZÜM: zoom aralığını tek bir lensin bölgesinde tut (`LensRange`):
-  TELE = eşik+0.5 → max (15x→4x, geniş menzil, geçişsiz), MAIN = 1x → eşik-0.1.
+  TELE = eşik+0.2 → max, MAIN = 1x → eşik-0.2 (`zoomBoundsFor`).
+  Honor Magic 8 Pro'da telefoto TAM 3.7x'te (85mm) devreye giriyor — varsayılan eşik 3.7.
+- UI TUZAĞI: dikey LinearLayout'a eklenen View varsayılan MATCH_PARENT genişlik alır;
+  HorizontalScrollView içinde bu genişlik 0'a çöker ve yazı tek harfe kırpılır.
+  Kodla üretilen her etikete AÇIKÇA WRAP_CONTENT layoutParams ver.
   Eşik kullanıcı tarafından canlı kalibre edilir (ayarlarda SeekBar).
 - Titreme nedenleri ve çözümleri: (1) ValueAnimator 120 Hz'de zoom isteği yağdırıyordu
   → `ZoomSequencePlayer.emitZoom` ~30 Hz'e seyreltir; (2) zoom sırasında otomatik odak

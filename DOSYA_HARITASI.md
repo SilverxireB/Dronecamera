@@ -12,7 +12,8 @@ Bölge başlıklarıyla gezin (`// ---- ...` yorum satırları):
 - `UI yardimcilari`: `dp/isBusy/haptic/setVisible/makeChip/styleChip/refreshAll`,
   jenerik `addChipRow()`, `addSwitchRow()`
 - `Menu kurulumu`: `buildModeCarousel()` (nokta göstergeli mod şeridi),
-  `buildLensSegments()` (TELE/MAIN/FULL), `buildSettingsSheet()` (tüm ayar satırları),
+  `buildLensSegments()` + `updateLensLabels()/zoomBoundsFor()/fmtZoom()` (çiplerde
+  gerçek aralık yazar: "TELE 4–15x"), `buildSettingsSheet()` (tüm ayar satırları),
   `addThresholdRow()` (canlı kalibrasyon SeekBar), `setupControls()`,
   `toggleSettings()`, `applyModeToUi()`
 - `Kamera`: `startCamera()`, `bindCamera()` (sabitleme için 3 kademeli fallback:

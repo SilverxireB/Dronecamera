@@ -71,7 +71,7 @@ class MainActivity : AppCompatActivity() {
     private var zoomOut = true
     private var curve = ZoomCurve.CINEMATIC
     private var countdownSec = 0
-    private var lensThreshold = 3.5f
+    private var lensThreshold = 3.7f // Honor Magic 8 Pro: telefoto 3.7x'te (85mm) devreye girer
     private var lockExposure = true
     private var stabilization = true
     private var showGrid = false
@@ -83,6 +83,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Secili durumu yeniden boyayan fonksiyonlar (cip gruplari). */
     private val refreshers = mutableListOf<() -> Unit>()
+    private val lensChips = linkedMapOf<LensRange, TextView>()
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -264,16 +265,27 @@ class MainActivity : AppCompatActivity() {
     // ---------------------------------------------------------------- Menu kurulumu
 
     private fun buildModeCarousel() {
-        val chips = CameraMode.values().map { m ->
+        val items = CameraMode.values().map { m ->
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = android.view.Gravity.CENTER_HORIZONTAL
-                setPadding(dp(12), dp(6), dp(12), dp(2))
+                setPadding(dp(13), dp(6), dp(13), dp(2))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
             }
             val label = TextView(this).apply {
                 text = getString(m.labelRes)
                 textSize = 12f
                 letterSpacing = 0.08f
+                maxLines = 1
+                // Dikey LinearLayout varsayilan olarak MATCH_PARENT genislik verir;
+                // yatay kaydirma icinde bu genislik sifira coker ve yazi kirpilir.
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
             }
             val dot = View(this).apply {
                 layoutParams = LinearLayout.LayoutParams(dp(5), dp(5)).also { it.topMargin = dp(6) }
@@ -291,18 +303,26 @@ class MainActivity : AppCompatActivity() {
                 bindCamera()
             }
             binding.modeRow.addView(item)
-            Triple(m, label, dot)
+            m to item
         }
         refreshers += {
-            chips.forEach { (m, label, dot) ->
+            items.forEach { (m, item) ->
                 val selected = m == mode
+                val label = item.getChildAt(0) as TextView
                 label.setTextColor(
                     ContextCompat.getColor(
                         this, if (selected) R.color.textPrimary else R.color.textTertiary
                     )
                 )
-                label.alpha = if (selected) 1f else 0.75f
-                dot.visibility = if (selected) View.VISIBLE else View.INVISIBLE
+                item.getChildAt(1).visibility = if (selected) View.VISIBLE else View.INVISIBLE
+                if (selected) {
+                    // Secili mod her zaman gorunur olsun diye seride ortala.
+                    binding.modeScroll.post {
+                        binding.modeScroll.smoothScrollTo(
+                            item.left - (binding.modeScroll.width - item.width) / 2, 0
+                        )
+                    }
+                }
             }
         }
     }
@@ -311,6 +331,7 @@ class MainActivity : AppCompatActivity() {
     private fun buildLensSegments() {
         val segments = LensRange.values().map { range ->
             val chip = makeChip(getString(range.labelRes))
+            chip.maxLines = 1
             chip.setOnClickListener {
                 if (isBusy()) return@setOnClickListener
                 haptic(chip)
@@ -322,10 +343,42 @@ class MainActivity : AppCompatActivity() {
             binding.lensRow.addView(chip)
             range to chip
         }
+        lensChips.putAll(segments)
         refreshers += {
             segments.forEach { (range, chip) -> styleChip(chip, range == lensRange) }
+            updateLensLabels()
         }
     }
+
+    private fun fmtZoom(value: Float): String =
+        if (value < 1f) String.format(Locale.US, "%.1f", value)
+        else String.format(Locale.US, "%.0f", value)
+
+    /** Cip etiketlerine o menzilin gercek zoom araligini yazar (or. "TELE 4-15x"). */
+    private fun updateLensLabels() {
+        val state = camera?.cameraInfo?.zoomState?.value ?: return
+        lensChips.forEach { (range, chip) ->
+            val bounds = zoomBoundsFor(range, state.minZoomRatio, state.maxZoomRatio)
+            chip.text = getString(
+                R.string.lens_label_fmt,
+                getString(range.labelRes),
+                fmtZoom(bounds.first),
+                fmtZoom(bounds.second)
+            )
+        }
+    }
+
+    /**
+     * Bir menzilin alt/ust zoom sinirlari. Lens gecis esigi kullanicinin
+     * kalibre ettigi degerdir; TELE esigin hemen ustunde baslar (telefotonun
+     * kendi optik baslangici), GENIS esigin hemen altinda biter.
+     */
+    private fun zoomBoundsFor(range: LensRange, deviceMin: Float, deviceMax: Float): Pair<Float, Float> =
+        when (range) {
+            LensRange.TELE -> min(lensThreshold + 0.2f, deviceMax) to deviceMax
+            LensRange.MAIN -> 1f to min(lensThreshold - 0.2f, deviceMax)
+            LensRange.FULL -> deviceMin to deviceMax
+        }
 
     private fun buildSettingsSheet() {
         val content = binding.settingsContent
@@ -452,7 +505,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Moda gore hangi kontrollerin gorunecegini ayarlar. */
     private fun applyModeToUi() {
-        setVisible(binding.lensRow, mode.allowsLensRange)
+        setVisible(binding.lensScroll, mode.allowsLensRange)
         setVisible(binding.btnFlip, mode == CameraMode.PHOTO || mode == CameraMode.VIDEO)
         binding.gridGroup.visibility = gridVisibility()
 
@@ -594,6 +647,7 @@ class MainActivity : AppCompatActivity() {
     private fun observeZoom() {
         camera?.cameraInfo?.zoomState?.observe(this) { state ->
             binding.zoomText.text = getString(R.string.zoom_format, state.zoomRatio)
+            updateLensLabels()
         }
     }
 
@@ -654,12 +708,11 @@ class MainActivity : AppCompatActivity() {
         val deviceMax = state.maxZoomRatio
 
         val (rawStart, rawEnd) = when (mode) {
-            CameraMode.VERTIGO -> min(lensThreshold - 0.1f, deviceMax) to 1f
+            CameraMode.VERTIGO -> min(lensThreshold - 0.2f, deviceMax) to 1f
             CameraMode.DRONIE -> min(2.5f, deviceMax) to deviceMin
-            else -> when (lensRange) {
-                LensRange.TELE -> deviceMax to min(lensThreshold + 0.5f, deviceMax)
-                LensRange.MAIN -> min(lensThreshold - 0.1f, deviceMax) to 1f
-                LensRange.FULL -> deviceMax to deviceMin
+            else -> {
+                val bounds = zoomBoundsFor(lensRange, deviceMin, deviceMax)
+                bounds.second to bounds.first
             }
         }
         val start = rawStart.coerceIn(deviceMin, deviceMax)
@@ -879,7 +932,7 @@ class MainActivity : AppCompatActivity() {
         binding.progressBar.progress = 0
         setVisible(binding.progressBar, recording && mode.isZoomMode)
         binding.modeScroll.alpha = if (recording) 0.35f else 1f
-        binding.lensRow.alpha = if (recording) 0.35f else 1f
+        binding.lensScroll.alpha = if (recording) 0.35f else 1f
         binding.btnSettings.alpha = if (recording) 0.35f else 1f
         binding.btnFlip.alpha = if (recording) 0.35f else 1f
         if (recording) binding.guideText.visibility = View.GONE else applyModeToUi()

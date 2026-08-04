@@ -12,9 +12,10 @@
     <string name="mode_dronie">DRONIE</string>
 
     <!-- Lens menzili -->
-    <string name="range_tele">Tele · tek lens</string>
-    <string name="range_main">Geniş · tek lens</string>
-    <string name="range_full">Tam menzil</string>
+    <string name="range_tele">TELE</string>
+    <string name="range_main">GENİŞ</string>
+    <string name="range_full">TAM</string>
+    <string name="lens_label_fmt">%1$s %2$s–%3$sx</string>
     <string name="full_range_warning">Tam menzilde lens değişimi görünür olabilir</string>
 
     <!-- Ayarlar -->

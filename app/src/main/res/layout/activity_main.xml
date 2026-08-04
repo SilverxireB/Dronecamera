@@ -164,12 +164,22 @@
             android:progressDrawable="@drawable/progress_line"
             android:visibility="gone" />
 
-        <LinearLayout
-            android:id="@+id/lensRow"
-            android:layout_width="wrap_content"
+        <HorizontalScrollView
+            android:id="@+id/lensScroll"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-            android:orientation="horizontal" />
+            android:clipToPadding="false"
+            android:fillViewport="true"
+            android:paddingHorizontal="20dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/lensRow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
 
         <HorizontalScrollView
             android:id="@+id/modeScroll"
