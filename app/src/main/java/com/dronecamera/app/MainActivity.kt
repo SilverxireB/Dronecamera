@@ -1490,6 +1490,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Cihazin destekledigi en iyi sabitleme modunu secer. Onizleme sabitlemesi
+     * (API 33+) OIS ile birlikte calisir ve en akici sonucu verir; yoksa klasik
+     * EIS'e, o da yoksa kapaliya duser.
+     */
+    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
+    private fun bestStabilizationMode(): Int {
+        val off = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+        val on = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+        if (!stabilization) return off
+        val info = camera?.cameraInfo ?: return on
+        val modes = runCatching {
+            Camera2CameraInfo.from(info).getCameraCharacteristic(
+                CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES
+            )
+        }.getOrNull() ?: return on
+
+        val previewStabilization = 2 // CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION
+        return when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                modes.contains(previewStabilization) -> previewStabilization
+            modes.contains(on) -> on
+            else -> off
+        }
+    }
+
+    /**
      * Cekim boyunca pozlama, renk ve odagi sabitler. Zoom sirasinda otomatik
      * odagin "av"a cikmasi goruntude nefes alma/titreme yaratir; kilit bunu
      * engeller. EIS her zaman aciktir.
