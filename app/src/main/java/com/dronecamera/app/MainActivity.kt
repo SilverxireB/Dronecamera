@@ -363,7 +363,7 @@ class MainActivity : AppCompatActivity() {
         )
         addSwitchRow(
             content, R.string.opt_stab_title, R.string.opt_stab_summary,
-            { stabilization }, { stabilization = it; bindCamera() }
+            { stabilization }, { stabilization = it; applyCaptureOptions(locked = false) }
         )
         addSwitchRow(
             content, R.string.opt_grid_title, R.string.opt_grid_summary,
@@ -492,49 +492,66 @@ class MainActivity : AppCompatActivity() {
     private fun bindCamera() {
         val provider = this.provider ?: return
         val selector = chooseCameraSelector(provider)
-        val attempts = if (stabilization) listOf(2, 1, 0) else listOf(0)
 
-        for (level in attempts) {
-            try {
-                provider.unbindAll()
-                val preview = Preview.Builder()
-                    .apply { if (level == 2) setPreviewStabilizationEnabled(true) }
+        try {
+            provider.unbindAll()
+            val preview = Preview.Builder().build()
+                .also { it.setSurfaceProvider(binding.previewView.surfaceProvider) }
+
+            camera = if (mode == CameraMode.PHOTO) {
+                val capture = ImageCapture.Builder()
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                     .build()
-                    .also { it.setSurfaceProvider(binding.previewView.surfaceProvider) }
-
-                camera = if (mode == CameraMode.PHOTO) {
-                    val capture = ImageCapture.Builder()
-                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                        .build()
-                    imageCapture = capture
-                    videoCapture = null
-                    provider.bindToLifecycle(this, selector, preview, capture)
-                } else {
-                    val recorder = Recorder.Builder()
-                        .setQualitySelector(
-                            QualitySelector.fromOrderedList(
-                                listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
-                            )
+                imageCapture = capture
+                videoCapture = null
+                provider.bindToLifecycle(this, selector, preview, capture)
+            } else {
+                // FHD, 4K'ya gore hem daha akici hem sabitlemeyi daha genis
+                // destekler; titreme icin bilincli tercih.
+                val recorder = Recorder.Builder()
+                    .setQualitySelector(
+                        QualitySelector.fromOrderedList(
+                            listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
                         )
-                        .build()
-                    val capture = VideoCapture.Builder(recorder)
-                        .apply { if (level == 1) setVideoStabilizationEnabled(true) }
-                        .build()
-                    imageCapture = null
-                    videoCapture = capture
-                    provider.bindToLifecycle(this, selector, preview, capture)
-                }
-                observeZoom()
-                applyCaptureOptions(locked = false)
-                applyStartZoom()
-                return
-            } catch (e: Exception) {
-                if (level == attempts.last()) {
-                    Toast.makeText(
-                        this, getString(R.string.camera_error, e.message), Toast.LENGTH_LONG
-                    ).show()
-                }
+                    )
+                    .build()
+                val capture = VideoCapture.withOutput(recorder)
+                imageCapture = null
+                videoCapture = capture
+                provider.bindToLifecycle(this, selector, preview, capture)
             }
+            observeZoom()
+            applyCaptureOptions(locked = false)
+            applyStartZoom()
+        } catch (e: Exception) {
+            Toast.makeText(this, getString(R.string.camera_error, e.message), Toast.LENGTH_LONG)
+                .show()
+        }
+    }
+
+    /**
+     * Cihazin destekledigi en iyi sabitleme modunu secer. Onizleme sabitlemesi
+     * (API 33+) OIS ile birlikte calisir ve en akici sonucu verir; yoksa klasik
+     * EIS'e, o da yoksa kapaliya duser.
+     */
+    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
+    private fun bestStabilizationMode(): Int {
+        val off = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+        val on = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+        if (!stabilization) return off
+        val info = camera?.cameraInfo ?: return on
+        val modes = runCatching {
+            Camera2CameraInfo.from(info).getCameraCharacteristic(
+                CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES
+            )
+        }.getOrNull() ?: return on
+
+        val previewStabilization = 2 // CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION
+        return when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                modes.contains(previewStabilization) -> previewStabilization
+            modes.contains(on) -> on
+            else -> off
         }
     }
 
@@ -599,8 +616,7 @@ class MainActivity : AppCompatActivity() {
         val options = CaptureRequestOptions.Builder()
             .setCaptureRequestOption(
                 CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                if (stabilization) CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
-                else CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+                bestStabilizationMode()
             )
             .setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, locked)
             .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, locked)
