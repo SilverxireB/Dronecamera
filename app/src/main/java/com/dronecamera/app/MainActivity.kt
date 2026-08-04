@@ -35,6 +35,7 @@ import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
@@ -77,6 +78,10 @@ class MainActivity : AppCompatActivity() {
     private var lensThreshold = 3.7f // Honor Magic 8 Pro: telefoto 3.7x'te (85mm) devreye girer
     private var lockExposure = true
     private var stabilization = true
+    /** Donanim tavaninin uzerine eklenen yazilimsal zoom carpani (1 = kapali). */
+    private var softZoomMax = 1f
+    private var softZoomLevel = 1f
+    private var zoomProcessor: ZoomSurfaceProcessor? = null
     private var showGrid = false
     private var useFrontCamera = false
 
@@ -138,6 +143,7 @@ class MainActivity : AppCompatActivity() {
         countdownSec = prefs.getInt("countdownSec", countdownSec)
         lensThreshold = prefs.getFloat("lensThreshold", lensThreshold)
         lockExposure = prefs.getBoolean("lockExposure", lockExposure)
+        softZoomMax = prefs.getFloat("softZoomMax", softZoomMax)
         stabilization = prefs.getBoolean("stabilization", stabilization)
         showGrid = prefs.getBoolean("showGrid", showGrid)
     }
@@ -152,6 +158,7 @@ class MainActivity : AppCompatActivity() {
             .putInt("countdownSec", countdownSec)
             .putFloat("lensThreshold", lensThreshold)
             .putBoolean("lockExposure", lockExposure)
+            .putFloat("softZoomMax", softZoomMax)
             .putBoolean("stabilization", stabilization)
             .putBoolean("showGrid", showGrid)
             .apply()
@@ -378,12 +385,38 @@ class MainActivity : AppCompatActivity() {
      * kalibre ettigi degerdir; TELE esigin hemen ustunde baslar (telefotonun
      * kendi optik baslangici), GENIS esigin hemen altinda biter.
      */
-    private fun zoomBoundsFor(range: LensRange, deviceMin: Float, deviceMax: Float): Pair<Float, Float> =
-        when (range) {
-            LensRange.TELE -> min(lensThreshold + 0.2f, deviceMax) to deviceMax
-            LensRange.MAIN -> 1f to min(lensThreshold - 0.2f, deviceMax)
-            LensRange.FULL -> deviceMin to deviceMax
+    private fun zoomBoundsFor(range: LensRange, deviceMin: Float, deviceMax: Float): Pair<Float, Float> {
+        val low = when (range) {
+            LensRange.TELE -> min(lensThreshold + 0.2f, deviceMax)
+            LensRange.MAIN -> 1f
+            LensRange.FULL -> deviceMin
         }
+        return low to opticalCeiling(range, deviceMax) * softZoomMax
+    }
+
+    /**
+     * Bir menzilde optik zoom'un cikabilecegi en ust deger. Bunun uzeri
+     * yazilimsal kirpma ile saglanir; boylece lens degismeden daha uzun
+     * bir menzil elde edilir.
+     */
+    private fun opticalCeiling(range: LensRange, deviceMax: Float): Float = when (range) {
+        LensRange.TELE, LensRange.FULL -> deviceMax
+        LensRange.MAIN -> min(lensThreshold - 0.2f, deviceMax)
+    }
+
+    private fun currentOpticalCeiling(): Float {
+        val deviceMax = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 1f
+        return if (mode.allowsLensRange) opticalCeiling(lensRange, deviceMax) else deviceMax
+    }
+
+    /** Istenen efektif zoom'u optik + yazilimsal kirpma olarak ikiye boler. */
+    private fun applyEffectiveZoom(effective: Float) {
+        val ceiling = currentOpticalCeiling()
+        val optical = min(effective, ceiling)
+        camera?.cameraControl?.setZoomRatio(optical)
+        softZoomLevel = (effective / optical).coerceAtLeast(1f)
+        zoomProcessor?.zoom = softZoomLevel
+    }
 
     private fun buildSettingsSheet() {
         val content = binding.settingsContent
@@ -411,6 +444,17 @@ class MainActivity : AppCompatActivity() {
                 10 to getString(R.string.countdown_10)
             ),
             { countdownSec }, { countdownSec = it }
+        )
+
+        addChipRow(
+            content, R.string.label_soft_zoom,
+            listOf(
+                1f to getString(R.string.soft_off),
+                1.5f to getString(R.string.soft_fmt, "1.5"),
+                2f to getString(R.string.soft_fmt, "2"),
+                3f to getString(R.string.soft_fmt, "3")
+            ),
+            { softZoomMax }, { softZoomMax = it; bindCamera() }
         )
 
         addThresholdRow(content)
@@ -480,7 +524,12 @@ class MainActivity : AppCompatActivity() {
                 lensThreshold = 2f + progress / 10f
                 value.text = getString(R.string.zoom_format, lensThreshold)
                 // Canli kalibrasyon: onizlemeyi tam esik degerine goturur.
-                if (fromUser && !isBusy()) camera?.cameraControl?.setZoomRatio(lensThreshold)
+                // Kalibrasyon saf optik zoom ile yapilir; yazilim kirpmasi devre disi.
+                if (fromUser && !isBusy()) {
+                    softZoomLevel = 1f
+                    zoomProcessor?.zoom = 1f
+                    camera?.cameraControl?.setZoomRatio(lensThreshold)
+                }
             }
 
             override fun onStartTrackingTouch(sb: SeekBar?) = Unit
@@ -563,44 +612,70 @@ class MainActivity : AppCompatActivity() {
      * once onizleme sabitlemesi (en akici), sonra video sabitlemesi, en son
      * sabitlemesiz deneme yapilir.
      */
-    private fun bindCamera() {
+    private fun bindCamera(withSoftZoom: Boolean = softZoomMax > 1f) {
         val provider = this.provider ?: return
         val selector = chooseCameraSelector(provider)
         pendingStartZoom = true
+
+        zoomProcessor?.release()
+        zoomProcessor = null
+        softZoomLevel = 1f
 
         try {
             provider.unbindAll()
             val preview = Preview.Builder().build()
                 .also { it.setSurfaceProvider(binding.previewView.surfaceProvider) }
 
-            camera = if (mode == CameraMode.PHOTO) {
+            val group = UseCaseGroup.Builder().addUseCase(preview)
+            if (mode == CameraMode.PHOTO) {
                 val capture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                     .build()
                 imageCapture = capture
                 videoCapture = null
-                provider.bindToLifecycle(this, selector, preview, capture)
+                group.addUseCase(capture)
             } else {
-                // FHD, 4K'ya gore hem daha akici hem sabitlemeyi daha genis
-                // destekler; titreme icin bilincli tercih.
+                // Yazilim zoom aciksa 4K kaydediyoruz: 1080p'ye kirparken
+                // 2 kata kadar detay kaybi olmaz. Aksi halde FHD daha akici.
+                val qualities = if (withSoftZoom) {
+                    listOf(Quality.UHD, Quality.FHD, Quality.HD)
+                } else {
+                    listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
+                }
                 val recorder = Recorder.Builder()
-                    .setQualitySelector(
-                        QualitySelector.fromOrderedList(
-                            listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
-                        )
-                    )
+                    .setQualitySelector(QualitySelector.fromOrderedList(qualities))
                     .build()
                 val capture = VideoCapture.withOutput(recorder)
                 imageCapture = null
                 videoCapture = capture
-                provider.bindToLifecycle(this, selector, preview, capture)
+                group.addUseCase(capture)
             }
+
+            // Yazilim zoom yalnizca video modlarinda anlamli.
+            if (withSoftZoom && mode != CameraMode.PHOTO) {
+                val processor = ZoomSurfaceProcessor()
+                zoomProcessor = processor
+                group.addEffect(SoftZoomEffect(processor))
+            }
+
+            camera = provider.bindToLifecycle(this, selector, group.build())
             observeZoom()
             applyCaptureOptions(locked = false)
             applyStartZoom()
         } catch (e: Exception) {
-            Toast.makeText(this, getString(R.string.camera_error, e.message), Toast.LENGTH_LONG)
-                .show()
+            zoomProcessor?.release()
+            zoomProcessor = null
+            if (withSoftZoom) {
+                // Cihaz efekt hattini kabul etmedi; yazilim zoom'suz devam et.
+                Toast.makeText(this, R.string.soft_zoom_unsupported, Toast.LENGTH_LONG).show()
+                softZoomMax = 1f
+                savePrefs()
+                refreshAll()
+                bindCamera(withSoftZoom = false)
+            } else {
+                Toast.makeText(this, getString(R.string.camera_error, e.message), Toast.LENGTH_LONG)
+                    .show()
+            }
         }
     }
 
@@ -667,7 +742,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val zoomObserver = Observer<ZoomState> { state ->
-        binding.zoomText.text = getString(R.string.zoom_format, state.zoomRatio)
+        binding.zoomText.text =
+            getString(R.string.zoom_format, state.zoomRatio * softZoomLevel)
         updateLensLabels()
         // Zoom durumu baglanmadan hemen sonra hazir olmayabiliyor; baslangic
         // zoom'unu ilk gecerli deger gelince uygula.
@@ -720,7 +796,7 @@ class MainActivity : AppCompatActivity() {
     private fun applyStartZoom() {
         if (isBusy()) return
         val range = resolveZoomRange() ?: return
-        camera?.cameraControl?.setZoomRatio(range.first)
+        applyEffectiveZoom(range.first)
         applyModeToUi()
     }
 
@@ -855,7 +931,7 @@ class MainActivity : AppCompatActivity() {
             CameraMode.VIDEO -> withCountdown { startRecording(null) }
             else -> {
                 val range = resolveZoomRange() ?: return
-                camera?.cameraControl?.setZoomRatio(range.first)
+                applyEffectiveZoom(range.first)
                 withCountdown { startRecording(buildSequence(range.first, range.second)) }
             }
         }
@@ -951,7 +1027,7 @@ class MainActivity : AppCompatActivity() {
                     if (sequence != null) {
                         sequencePlayer = ZoomSequencePlayer(
                             segments = sequence,
-                            setZoom = { camera?.cameraControl?.setZoomRatio(it) },
+                            setZoom = { applyEffectiveZoom(it) },
                             onProgress = { fraction, _ ->
                                 binding.progressBar.progress = (fraction * 100).toInt()
                             },
@@ -1008,5 +1084,7 @@ class MainActivity : AppCompatActivity() {
         countdownTimer?.cancel()
         sequencePlayer?.cancel()
         activeRecording?.stop()
+        zoomProcessor?.release()
+        zoomProcessor = null
     }
 }
