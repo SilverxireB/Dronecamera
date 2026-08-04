@@ -181,6 +181,18 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
 
     // ------------------------------------------------------------ Cizim
 
+    /**
+     * Kayit cikisini bulur. Cihazlarin bir kismi hedef bayraklarini cikis
+     * basina ayirmiyor; o durumda en yuksek cozunurluklu cikis kayittir.
+     */
+    private fun resolveVideoOutput(): SurfaceOutput? {
+        val exact = outputs.keys.firstOrNull { output ->
+            output.targets and CameraEffect.PREVIEW == 0 &&
+                output.targets and CameraEffect.VIDEO_CAPTURE != 0
+        }
+        return exact ?: outputs.keys.maxByOrNull { it.size.width * it.size.height }
+    }
+
     private fun drawFrame() {
         val texture = inputTexture ?: return
         if (outputs.isEmpty()) return
@@ -190,8 +202,9 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
         val timestamp = texture.timestamp
 
         val currentZoom = (zoomProvider?.invoke() ?: zoom).coerceAtLeast(1f)
+        val videoOutput = if (timeScale > 1f) resolveVideoOutput() else null
         outputs.forEach { (output, eglSurface) ->
-            val isVideo = output.targets == CameraEffect.VIDEO_CAPTURE
+            val isVideo = output === videoOutput
             var presentationTime = timestamp
             if (isVideo && timeScale > 1f) {
                 val skip = timeScale.toInt().coerceAtLeast(1)

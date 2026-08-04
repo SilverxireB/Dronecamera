@@ -88,6 +88,8 @@ class MainActivity : AppCompatActivity() {
     private var softZoomMax = 1f
     private var softZoomLevel = 1f
     private var zoomProcessor: ZoomSurfaceProcessor? = null
+    /** GPU kirpma hatti kurulabildi mi (kadraj merkezi ve timelapse buna bagli). */
+    private var effectActive = true
     private var lastOpticalRequested = 1f
     /**
      * Yazilim zoom acikken optik zoom cekim boyunca bu sabit degerde tutulur;
@@ -644,13 +646,32 @@ class MainActivity : AppCompatActivity() {
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.textTertiary))
             setPadding(dp(4), dp(18), 0, dp(2))
         })
+        val headerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
         val label = TextView(this).apply {
             textSize = 13f
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accentIce))
             setPadding(dp(4), 0, 0, dp(4))
+            layoutParams = LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+            )
         }
-        container.addView(label)
+        headerRow.addView(label)
         exposureLabel = label
+
+        // Pozlamayi otomatige (0 EV) dondurmek icin kestirme.
+        val reset = makeChip(getString(R.string.exposure_reset))
+        reset.setOnClickListener {
+            haptic(reset)
+            exposurePercent = neutralExposurePercent()
+            applyExposure()
+            savePrefs()
+            refreshAll()
+        }
+        headerRow.addView(reset)
+        container.addView(headerRow)
 
         val bar = SeekBar(this).apply {
             max = 100
@@ -797,6 +818,11 @@ class MainActivity : AppCompatActivity() {
         // GL doku uzayinda dikey eksen terstir.
         zoomProcessor?.setCenter((x / width).coerceIn(0f, 1f), 1f - (y / height).coerceIn(0f, 1f))
 
+        // Kirpma penceresi tum kareyi kapliyorsa merkezi kaydiracak pay yoktur.
+        if (zoomProcessor == null || softZoomLevel < 1.05f) {
+            Toast.makeText(this, R.string.center_needs_zoom, Toast.LENGTH_SHORT).show()
+        }
+
         runCatching {
             val point = binding.previewView.meteringPointFactory.createPoint(x, y)
             camera?.cameraControl?.startFocusAndMetering(
@@ -821,6 +847,15 @@ class MainActivity : AppCompatActivity() {
         marker.animate().alpha(0f).setStartDelay(700).setDuration(400)
             .withEndAction { marker.visibility = View.GONE }
             .start()
+    }
+
+    /** 0 EV'ye (otomatik pozlama) karsilik gelen kaydirici konumu. */
+    private fun neutralExposurePercent(): Int {
+        val state = camera?.cameraInfo?.exposureState ?: return 50
+        val range = state.exposureCompensationRange
+        val span = (range.upper - range.lower).toFloat()
+        if (span <= 0f) return 50
+        return (-range.lower / span * 100f).toInt().coerceIn(0, 100)
     }
 
     /** Pozlama telafisini cihazin destekledigi araliga esleyerek uygular. */
@@ -997,16 +1032,48 @@ class MainActivity : AppCompatActivity() {
      * once onizleme sabitlemesi (en akici), sonra video sabitlemesi, en son
      * sabitlemesiz deneme yapilir.
      */
-    private fun bindCamera(withSoftZoom: Boolean = softZoomMax > 1f) {
+    /**
+     * Kullanim durumlarini baglar.
+     *
+     * GPU kirpma hatti (efekt) yalnizca ekstra zoom icin degil; kadraj merkezi
+     * ve timelapse de ondan geciyor. Bu yuzden hat HER ZAMAN kurulmaya
+     * calisilir; yalnizca cihaz kabul etmezse efektsiz devam edilir.
+     * Basarisizlikta once cozunurluk dusurulur, efektten en son vazgecilir.
+     */
+    private fun bindCamera() {
         val provider = this.provider ?: return
-        val selector = chooseCameraSelector(provider)
         pendingStartZoom = true
-
         zoomProcessor?.release()
         zoomProcessor = null
         softZoomLevel = 1f
 
-        try {
+        val attempts = mutableListOf(true to recordUhd)
+        if (recordUhd) attempts += true to false
+        attempts += false to recordUhd
+        if (recordUhd) attempts += false to false
+
+        for ((withEffect, uhd) in attempts) {
+            if (tryBind(provider, withEffect, uhd)) {
+                if (!withEffect && effectActive) {
+                    Toast.makeText(this, R.string.soft_zoom_unsupported, Toast.LENGTH_LONG).show()
+                }
+                effectActive = withEffect
+                refreshAll()
+                return
+            }
+            zoomProcessor?.release()
+            zoomProcessor = null
+        }
+        Toast.makeText(this, getString(R.string.camera_error, ""), Toast.LENGTH_LONG).show()
+    }
+
+    private fun tryBind(
+        provider: ProcessCameraProvider,
+        withEffect: Boolean,
+        uhd: Boolean
+    ): Boolean {
+        val selector = chooseCameraSelector(provider)
+        return try {
             provider.unbindAll()
             val preview = Preview.Builder()
                 .setTargetRotation(currentRotation())
@@ -1015,7 +1082,7 @@ class MainActivity : AppCompatActivity() {
 
             // 4K, yazilim kirpmasi icin pay birakir: 1080p'ye kirparken 2 kata
             // kadar detay kaybi olmaz.
-            val qualities = if (recordUhd) {
+            val qualities = if (uhd) {
                 listOf(Quality.UHD, Quality.FHD, Quality.HD)
             } else {
                 listOf(Quality.FHD, Quality.HD)
@@ -1029,23 +1096,24 @@ class MainActivity : AppCompatActivity() {
 
             val group = UseCaseGroup.Builder().addUseCase(preview).addUseCase(capture)
 
-            if (withSoftZoom) {
+            if (withEffect) {
                 val processor = ZoomSurfaceProcessor()
                 zoomProcessor = processor
                 group.addEffect(
                     SoftZoomEffect(processor) { error ->
                         // Efekt hatti calisirken hata verirse sessizce siyah
-                        // ekranda kalmak yerine yazilim zoom'u kapat.
+                        // ekranda kalmak yerine efektsiz devam et.
                         runOnUiThread {
                             Toast.makeText(
                                 this,
                                 getString(R.string.soft_zoom_failed, error.message),
                                 Toast.LENGTH_LONG
                             ).show()
-                            softZoomMax = 1f
-                            savePrefs()
+                            effectActive = false
+                            zoomProcessor?.release()
+                            zoomProcessor = null
                             refreshAll()
-                            bindCamera(withSoftZoom = false)
+                            tryBind(provider, withEffect = false, uhd = uhd)
                         }
                     }
                 )
@@ -1056,46 +1124,9 @@ class MainActivity : AppCompatActivity() {
             applyCaptureOptions(locked = false)
             applyExposure()
             applyStartZoom()
+            true
         } catch (e: Exception) {
-            zoomProcessor?.release()
-            zoomProcessor = null
-            if (withSoftZoom) {
-                // Cihaz efekt hattini kabul etmedi; yazilim zoom'suz devam et.
-                Toast.makeText(this, R.string.soft_zoom_unsupported, Toast.LENGTH_LONG).show()
-                softZoomMax = 1f
-                savePrefs()
-                refreshAll()
-                bindCamera(withSoftZoom = false)
-            } else {
-                Toast.makeText(this, getString(R.string.camera_error, e.message), Toast.LENGTH_LONG)
-                    .show()
-            }
-        }
-    }
-
-    /**
-     * Cihazin destekledigi en iyi sabitleme modunu secer. Onizleme sabitlemesi
-     * (API 33+) OIS ile birlikte calisir ve en akici sonucu verir; yoksa klasik
-     * EIS'e, o da yoksa kapaliya duser.
-     */
-    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
-    private fun bestStabilizationMode(): Int {
-        val off = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
-        val on = CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
-        if (!stabilization) return off
-        val info = camera?.cameraInfo ?: return on
-        val modes = runCatching {
-            Camera2CameraInfo.from(info).getCameraCharacteristic(
-                CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES
-            )
-        }.getOrNull() ?: return on
-
-        val previewStabilization = 2 // CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION
-        return when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                modes.contains(previewStabilization) -> previewStabilization
-            modes.contains(on) -> on
-            else -> off
+            false
         }
     }
 
