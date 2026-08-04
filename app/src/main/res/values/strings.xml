@@ -28,6 +28,7 @@
     <string name="soft_off">Kapalı</string>
     <string name="soft_fmt">+%sx</string>
     <string name="soft_zoom_unsupported">Cihaz yazılım zoom hattını kabul etmedi, kapatıldı.</string>
+    <string name="soft_zoom_failed">Yazılım zoom hatası (%s), kapatıldı.</string>
     <string name="label_threshold">LENS EŞİĞİ</string>
     <string name="threshold_help">Kaydırıcıyı oynat, görüntünün sıçradığı değeri bul. Tek lens menzilleri bu eşiğin iki yanında kalır.</string>
     <string name="duration_fmt">%d sn</string>

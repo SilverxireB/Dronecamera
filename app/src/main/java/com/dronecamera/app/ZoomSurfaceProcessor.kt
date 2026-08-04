@@ -294,9 +294,12 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
 }
 
 /** CameraEffect korumali kuruculu oldugu icin turetiliyor. */
-class SoftZoomEffect(processor: ZoomSurfaceProcessor) : CameraEffect(
+class SoftZoomEffect(
+    processor: ZoomSurfaceProcessor,
+    onError: (Throwable) -> Unit
+) : CameraEffect(
     PREVIEW or VIDEO_CAPTURE,
     processor.executor,
     processor,
-    Consumer { }
+    Consumer { onError(it) }
 )

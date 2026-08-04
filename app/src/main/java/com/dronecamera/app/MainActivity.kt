@@ -655,7 +655,23 @@ class MainActivity : AppCompatActivity() {
             if (withSoftZoom && mode != CameraMode.PHOTO) {
                 val processor = ZoomSurfaceProcessor()
                 zoomProcessor = processor
-                group.addEffect(SoftZoomEffect(processor))
+                group.addEffect(
+                    SoftZoomEffect(processor) { error ->
+                        // Efekt hatti calisirken hata verirse sessizce siyah
+                        // ekranda kalmak yerine yazilim zoom'u kapat.
+                        runOnUiThread {
+                            Toast.makeText(
+                                this,
+                                getString(R.string.soft_zoom_failed, error.message),
+                                Toast.LENGTH_LONG
+                            ).show()
+                            softZoomMax = 1f
+                            savePrefs()
+                            refreshAll()
+                            bindCamera(withSoftZoom = false)
+                        }
+                    }
+                )
             }
 
             camera = provider.bindToLifecycle(this, selector, group.build())
@@ -856,8 +872,16 @@ class MainActivity : AppCompatActivity() {
                 bounds.second to bounds.first
             }
         }
-        val start = rawStart.coerceIn(deviceMin, deviceMax)
-        val end = rawEnd.coerceIn(deviceMin, deviceMax)
+        // Ust sinir cihazin optik tavani DEGIL, yazilim kirpmasiyla ulasilabilen
+        // efektif tavandir; aksi halde istenen zoom optige geri kirpilir ve
+        // yazilim zoom hic devreye girmez.
+        val maxEffective = if (mode.allowsLensRange) {
+            opticalCeiling(lensRange, deviceMax) * softZoomMax
+        } else {
+            deviceMax
+        }
+        val start = rawStart.coerceIn(deviceMin, maxEffective)
+        val end = rawEnd.coerceIn(deviceMin, maxEffective)
         val forward = zoomOut || mode == CameraMode.VERTIGO
         return if (forward) start to end else end to start
     }
