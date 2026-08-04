@@ -689,7 +689,14 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnGallery.setOnClickListener {
             haptic(it)
-            openLastVideo()
+            openGallery()
+        }
+        binding.btnGallery.setOnLongClickListener {
+            haptic(it)
+            if (!playLastVideo()) {
+                Toast.makeText(this, R.string.no_video_app, Toast.LENGTH_SHORT).show()
+            }
+            true
         }
         // Cekim sirasinda onizlemeye dokunmak (odaklama/parmakla zoom) rampayi
         // bozar; bu yuzden kayit ve prova boyunca dokunuslar yutulur.
@@ -723,7 +730,10 @@ class MainActivity : AppCompatActivity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         sizeSettingsSheet()
-        videoCapture?.targetRotation = currentRotation()
+        // Yalnizca hedef yonu guncellemek yetmiyor: GPU efekti devredeyken
+        // goruntu hatti baglanma anindaki yone gore kuruluyor ve sahne donuk
+        // kaliyor. Bu yuzden kamera yeni yonle bastan baglanir.
+        if (!isBusy()) bindCamera() else videoCapture?.targetRotation = currentRotation()
     }
 
     override fun onResume() {
@@ -736,15 +746,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Son cekilen videoyu galeride acar. */
-    private fun openLastVideo() {
-        val uri = lastVideoUri ?: return
+    /** Galeri uygulamasini acar; acilamazsa son videoyu oynatmaya duser. */
+    private fun openGallery() {
+        val gallery = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_GALLERY)
+        if (runCatching { startActivity(gallery) }.isSuccess) return
+        if (!playLastVideo()) {
+            Toast.makeText(this, R.string.no_video_app, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Son cekilen videoyu dogrudan oynatir (kucuk resme basili tutunca). */
+    private fun playLastVideo(): Boolean {
+        val uri = lastVideoUri ?: return false
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, "video/mp4")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        runCatching { startActivity(intent) }.onFailure {
-            Toast.makeText(this, R.string.no_video_app, Toast.LENGTH_SHORT).show()
-        }
+        return runCatching { startActivity(intent) }.isSuccess
     }
 
     private fun updateGalleryThumb() {
@@ -859,7 +876,9 @@ class MainActivity : AppCompatActivity() {
 
         try {
             provider.unbindAll()
-            val preview = Preview.Builder().build()
+            val preview = Preview.Builder()
+                .setTargetRotation(currentRotation())
+                .build()
                 .also { it.setSurfaceProvider(binding.previewView.surfaceProvider) }
 
             // 4K, yazilim kirpmasi icin pay birakir: 1080p'ye kirparken 2 kata

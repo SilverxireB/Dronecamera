@@ -216,15 +216,15 @@
             android:layout_marginTop="10dp">
 
             <ImageView
-                android:id="@+id/btnSettings"
+                android:id="@+id/btnGallery"
                 android:layout_width="46dp"
                 android:layout_height="46dp"
                 android:layout_gravity="center_vertical|start"
                 android:layout_marginStart="36dp"
-                android:contentDescription="@string/desc_settings"
-                android:padding="11dp"
-                android:src="@drawable/ic_settings"
-                app:tint="@color/textPrimary" />
+                android:background="@drawable/thumb_bg"
+                android:contentDescription="@string/desc_gallery"
+                android:scaleType="centerCrop"
+                android:visibility="gone" />
 
             <View
                 android:id="@+id/shutterButton"
@@ -235,15 +235,15 @@
                 android:contentDescription="@string/desc_shutter" />
 
             <ImageView
-                android:id="@+id/btnGallery"
+                android:id="@+id/btnSettings"
                 android:layout_width="46dp"
                 android:layout_height="46dp"
                 android:layout_gravity="center_vertical|end"
                 android:layout_marginEnd="36dp"
-                android:background="@drawable/thumb_bg"
-                android:contentDescription="@string/desc_gallery"
-                android:scaleType="centerCrop"
-                android:visibility="gone" />
+                android:contentDescription="@string/desc_settings"
+                android:padding="11dp"
+                android:src="@drawable/ic_settings"
+                app:tint="@color/textPrimary" />
         </FrameLayout>
     </LinearLayout>
 
