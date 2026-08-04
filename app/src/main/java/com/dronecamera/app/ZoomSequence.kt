@@ -28,6 +28,36 @@ sealed class ZoomSegment {
 }
 
 /**
+ * Sekansin belirli bir anindaki zoom degerini hesaplar. Oynaticinin
+ * seyreltilmis adimlarindan bagimsizdir; her karede cagrilarak tam degerin
+ * elde edilmesini saglar (yazilim kirpmasi bunu kullanir).
+ */
+fun List<ZoomSegment>.zoomAt(elapsedMs: Long): Float {
+    var remaining = elapsedMs.coerceAtLeast(0L)
+    for (segment in this) {
+        if (remaining < segment.durationMs) {
+            return when (segment) {
+                is ZoomSegment.Hold -> segment.zoom
+                is ZoomSegment.Ramp -> {
+                    val eased = segment.interpolator.getInterpolation(
+                        remaining.toFloat() / segment.durationMs
+                    )
+                    val logFrom = ln(segment.from.toDouble())
+                    val logTo = ln(segment.to.toDouble())
+                    exp(logFrom + (logTo - logFrom) * eased).toFloat()
+                }
+            }
+        }
+        remaining -= segment.durationMs
+    }
+    return when (val last = lastOrNull()) {
+        is ZoomSegment.Hold -> last.zoom
+        is ZoomSegment.Ramp -> last.to
+        else -> 1f
+    }
+}
+
+/**
  * Segment listesini sirayla oynatir.
  *
  * Titreme onlemi: ValueAnimator ekran tazeleme hizinda (120 Hz'e kadar)

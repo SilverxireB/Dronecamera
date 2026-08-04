@@ -24,6 +24,9 @@
     <string name="label_direction">YÖN</string>
     <string name="label_curve">HIZ EĞRİSİ</string>
     <string name="label_countdown">GERİ SAYIM</string>
+    <string name="label_engine">ZOOM MOTORU</string>
+    <string name="engine_software">Akıcı</string>
+    <string name="engine_optical">Net</string>
     <string name="label_soft_zoom">YAZILIM ZOOM</string>
     <string name="soft_off">Kapalı</string>
     <string name="soft_fmt">+%sx</string>

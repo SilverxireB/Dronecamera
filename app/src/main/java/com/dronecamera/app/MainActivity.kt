@@ -11,6 +11,7 @@ import android.hardware.camera2.CaptureRequest
 import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -82,6 +83,9 @@ class MainActivity : AppCompatActivity() {
     private var softZoomMax = 1f
     private var softZoomLevel = 1f
     private var zoomProcessor: ZoomSurfaceProcessor? = null
+    /** true: rampanin tamami yazilim kirpmasiyla yapilir (en akici). */
+    private var softwareRamp = true
+    private var lastOpticalRequested = 1f
     private var showGrid = false
     private var useFrontCamera = false
 
@@ -144,6 +148,7 @@ class MainActivity : AppCompatActivity() {
         lensThreshold = prefs.getFloat("lensThreshold", lensThreshold)
         lockExposure = prefs.getBoolean("lockExposure", lockExposure)
         softZoomMax = prefs.getFloat("softZoomMax", softZoomMax)
+        softwareRamp = prefs.getBoolean("softwareRamp", softwareRamp)
         stabilization = prefs.getBoolean("stabilization", stabilization)
         showGrid = prefs.getBoolean("showGrid", showGrid)
     }
@@ -159,6 +164,7 @@ class MainActivity : AppCompatActivity() {
             .putFloat("lensThreshold", lensThreshold)
             .putBoolean("lockExposure", lockExposure)
             .putFloat("softZoomMax", softZoomMax)
+            .putBoolean("softwareRamp", softwareRamp)
             .putBoolean("stabilization", stabilization)
             .putBoolean("showGrid", showGrid)
             .apply()
@@ -413,6 +419,7 @@ class MainActivity : AppCompatActivity() {
     private fun applyEffectiveZoom(effective: Float) {
         val ceiling = currentOpticalCeiling()
         val optical = min(effective, ceiling)
+        lastOpticalRequested = optical
         camera?.cameraControl?.setZoomRatio(optical)
         softZoomLevel = (effective / optical).coerceAtLeast(1f)
         zoomProcessor?.zoom = softZoomLevel
@@ -444,6 +451,15 @@ class MainActivity : AppCompatActivity() {
                 10 to getString(R.string.countdown_10)
             ),
             { countdownSec }, { countdownSec = it }
+        )
+
+        addChipRow(
+            content, R.string.label_engine,
+            listOf(
+                true to getString(R.string.engine_software),
+                false to getString(R.string.engine_optical)
+            ),
+            { softwareRamp }, { softwareRamp = it }
         )
 
         addChipRow(
@@ -1048,16 +1064,7 @@ class MainActivity : AppCompatActivity() {
                     isShotRunning = true
                     setRecordingUi(true)
                     if (lockExposure) applyCaptureOptions(locked = true)
-                    if (sequence != null) {
-                        sequencePlayer = ZoomSequencePlayer(
-                            segments = sequence,
-                            setZoom = { applyEffectiveZoom(it) },
-                            onProgress = { fraction, _ ->
-                                binding.progressBar.progress = (fraction * 100).toInt()
-                            },
-                            onEnd = { stopShot() }
-                        ).also { it.start() }
-                    }
+                    if (sequence != null) startZoomSequence(sequence)
                 }
                 is VideoRecordEvent.Status -> {
                     val sec = event.recordingStats.recordedDurationNanos / 1_000_000_000
@@ -1080,7 +1087,53 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Zoom rampasini baslatir.
+     *
+     * "Akici" motorda optik zoom cekim boyunca sabit tutulur ve rampanin
+     * tamami GPU kirpmasiyla yapilir: her kare icin tam deger hesaplandigi
+     * ve donanimin kademeli zoom adimlari devreye girmedigi icin gecis
+     * puruzsuzdur. "Net" motorda optik zoom rampayi takip eder (daha keskin
+     * goruntu), kirpma da istekler arasindaki bosluklari doldurur.
+     */
+    private fun startZoomSequence(sequence: List<ZoomSegment>) {
+        val processor = zoomProcessor
+        val useSoftwareRamp = softwareRamp && processor != null
+        val startedAt = SystemClock.elapsedRealtime()
+
+        val lowest = sequence.minOf { segment ->
+            when (segment) {
+                is ZoomSegment.Hold -> segment.zoom
+                is ZoomSegment.Ramp -> min(segment.from, segment.to)
+            }
+        }
+        val fixedOptical = min(lowest, currentOpticalCeiling())
+        if (useSoftwareRamp) {
+            lastOpticalRequested = fixedOptical
+            camera?.cameraControl?.setZoomRatio(fixedOptical)
+        }
+
+        processor?.zoomProvider = {
+            val basis = if (useSoftwareRamp) fixedOptical else lastOpticalRequested
+            val target = sequence.zoomAt(SystemClock.elapsedRealtime() - startedAt)
+            (target / basis).coerceIn(1f, MAX_SOFT_CROP)
+        }
+
+        sequencePlayer = ZoomSequencePlayer(
+            segments = sequence,
+            setZoom = { effective ->
+                binding.zoomText.text = getString(R.string.zoom_format, effective)
+                if (!useSoftwareRamp) applyEffectiveZoom(effective)
+            },
+            onProgress = { fraction, _ ->
+                binding.progressBar.progress = (fraction * 100).toInt()
+            },
+            onEnd = { stopShot() }
+        ).also { it.start() }
+    }
+
     private fun stopShot() {
+        zoomProcessor?.zoomProvider = null
         sequencePlayer?.cancel()
         sequencePlayer = null
         activeRecording?.stop()
@@ -1110,5 +1163,10 @@ class MainActivity : AppCompatActivity() {
         activeRecording?.stop()
         zoomProcessor?.release()
         zoomProcessor = null
+    }
+
+    private companion object {
+        /** Kirpma ile ulasilabilecek azami buyutme (asiri yumusamayi onler). */
+        const val MAX_SOFT_CROP = 12f
     }
 }

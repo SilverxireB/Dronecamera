@@ -36,6 +36,14 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
     @Volatile
     var zoom: Float = 1f
 
+    /**
+     * Ayarlandiginda zoom degeri her kare icin buradan okunur. Boylece kirpma
+     * kameranin kare hizina birebir oturur; 30 Hz'lik istek adimlarinin
+     * yarattigi kademeli gorunum ortadan kalkar.
+     */
+    @Volatile
+    var zoomProvider: (() -> Float)? = null
+
     private val thread = HandlerThread("SoftZoomGL").apply { start() }
     private val handler = Handler(thread.looper)
     val executor = Executor { command -> handler.post(command) }
@@ -142,7 +150,7 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
         texture.getTransformMatrix(stMatrix)
         val timestamp = texture.timestamp
 
-        val currentZoom = zoom.coerceAtLeast(1f)
+        val currentZoom = (zoomProvider?.invoke() ?: zoom).coerceAtLeast(1f)
         outputs.forEach { (output, eglSurface) ->
             if (!makeCurrent(eglSurface)) return@forEach
             output.updateTransformMatrix(finalMatrix, stMatrix)
