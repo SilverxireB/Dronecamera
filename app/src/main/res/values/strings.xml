@@ -107,9 +107,9 @@
 
     <!-- Rehberler -->
     <string name="vertigo_guide">Kayıt boyunca özneye doğru sabit hızda yürü</string>
-    <string name="reveal_guide">Özneye dokun (halka çıkar), sonra çek: kadraj oradan geniş açıya açılır</string>
-    <string name="pan_guide">Kaydırma payı yazılım zoom kadardır — daha geniş kaydırma için +3x seç</string>
-    <string name="two_point_guide">1) Parmakla zoom + dokunarak merkez kur  2) A tuşunu BASILI TUT  3) Yeni kadraj kur, B tuşunu BASILI TUT  4) Çek</string>
+    <string name="reveal_guide">AÇILIŞ: dokunduğun nokta başlangıç kadrajının merkezi olur, çekim oradan geniş açıya açılır</string>
+    <string name="pan_guide">KAYDIRMA: zoom sabit kalır, kadraj yatay süzülür · kayma payı yazılım zoom kadar (+3x daha geniş)</string>
+    <string name="two_point_guide">İKİ NOKTA: 1) parmakla zoom, dokunarak merkez  2) A\'yı BASILI TUT  3) yeni kadraj kur, B\'yi BASILI TUT  4) çek</string>
     <string name="dronie_guide">Telefonu yüzüne yakın tut, çekim uzaklaşarak açılır</string>
 
     <!-- Mesajlar -->

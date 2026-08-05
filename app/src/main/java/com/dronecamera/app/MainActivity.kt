@@ -111,7 +111,14 @@ class MainActivity : AppCompatActivity() {
     /** Pozlama kaydiricisinin konumu (0..100); cihazin EV araligina eslenir. */
     private var exposurePercent = 50
     private var exposureLabel: TextView? = null
-    /** Kirpma merkezi (GL doku uzayi, 0..1). Dokunarak degistirilir. */
+    /**
+     * Kirpma merkezi EKRAN uzayinda saklanir (0..1, y asagi) — kullanicinin
+     * gordugu duzlem budur. Kameradan gelen kare sensorun kendi yonunde
+     * (genelde yatay) geldigi icin GL'e verilmeden once dondurulur.
+     */
+    private var centerScreenX = ZoomSegment.CENTER
+    private var centerScreenY = ZoomSegment.CENTER
+    /** Yukaridakinin GL doku uzayindaki karsiligi. */
     private var centerX = ZoomSegment.CENTER
     private var centerY = ZoomSegment.CENTER
     /** IKI NOKTA modunda kullanicinin kurdugu kadrajlar. */
@@ -588,7 +595,7 @@ class MainActivity : AppCompatActivity() {
         camera?.cameraControl?.setZoomRatio(optical)
         softZoomLevel = (effective / optical).coerceIn(1f, MAX_SOFT_CROP)
         zoomProcessor?.zoom = softZoomLevel
-        zoomProcessor?.setCenter(centerX, centerY)
+        pushCenter()
         // Rozet dogrudan burada guncellenir: optik deger ayni kalip yalnizca
         // yazilim kirpmasi degistiginde zoom gozlemcisi tetiklenmiyor.
         updateZoomBadge(effective)
@@ -613,8 +620,9 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, getString(R.string.point_empty, label), Toast.LENGTH_SHORT)
                         .show()
                 } else {
-                    centerX = point.cx
-                    centerY = point.cy
+                    centerScreenX = point.cx
+                    centerScreenY = point.cy
+                    pushCenter()
                     composeZoom = point.zoom
                     applyEffectiveZoom(point.zoom)
                     Toast.makeText(
@@ -626,7 +634,7 @@ class MainActivity : AppCompatActivity() {
                 if (!isBusy()) {
                     haptic(chip)
                     val zoom = if (composeZoom > 0f) composeZoom else currentEffectiveZoom()
-                    val point = FramePoint(zoom, centerX, centerY)
+                    val point = FramePoint(zoom, centerScreenX, centerScreenY)
                     if (isA) pointA = point else pointB = point
                     savePrefs()
                     refreshAll()
@@ -1032,6 +1040,34 @@ class MainActivity : AppCompatActivity() {
 
     private fun currentRotation(): Int = binding.root.display?.rotation ?: Surface.ROTATION_0
 
+    /** Kameranin karesinin ekranda dik gorunmesi icin gereken donus. */
+    private fun sensorDegrees(): Int =
+        camera?.cameraInfo?.getSensorRotationDegrees(currentRotation()) ?: 0
+
+    /**
+     * Ekran koordinatini (0..1, y asagi) GL doku uzayina (0..1, y yukari)
+     * cevirir. Kare sensor yoninde geldigi icin bu donusum olmadan dokunulan
+     * nokta yanlis eksene dusuyordu.
+     */
+    private fun screenToBuffer(screenX: Float, screenY: Float): Pair<Float, Float> {
+        val sx = screenX.coerceIn(0f, 1f)
+        val sy = screenY.coerceIn(0f, 1f)
+        return when (sensorDegrees()) {
+            90 -> sy to sx
+            180 -> (1f - sx) to sy
+            270 -> (1f - sy) to (1f - sx)
+            else -> sx to (1f - sy)
+        }
+    }
+
+    /** Ekran uzayindaki merkezi doku uzayina cevirip islemciye gonderir. */
+    private fun pushCenter() {
+        val (bufferX, bufferY) = screenToBuffer(centerScreenX, centerScreenY)
+        centerX = bufferX
+        centerY = bufferY
+        zoomProcessor?.setCenter(centerX, centerY)
+    }
+
     /**
      * Kirpma penceresinin merkezini dokunulan noktaya tasir ve ayni noktaya
      * odaklanir. Boylece ozne kadrajin ortasinda olmak zorunda kalmaz; rampa
@@ -1042,10 +1078,9 @@ class MainActivity : AppCompatActivity() {
         val height = binding.previewView.height.toFloat()
         if (width <= 0f || height <= 0f) return
 
-        // GL doku uzayinda dikey eksen terstir.
-        centerX = (x / width).coerceIn(0f, 1f)
-        centerY = 1f - (y / height).coerceIn(0f, 1f)
-        zoomProcessor?.setCenter(centerX, centerY)
+        centerScreenX = (x / width).coerceIn(0f, 1f)
+        centerScreenY = (y / height).coerceIn(0f, 1f)
+        pushCenter()
 
         // Kirpma penceresi tum kareyi kapliyorsa merkezi kaydiracak pay yoktur.
         if (zoomProcessor == null || softZoomLevel < 1.05f) {
@@ -1062,9 +1097,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun resetFrameCenter() {
-        centerX = ZoomSegment.CENTER
-        centerY = ZoomSegment.CENTER
-        zoomProcessor?.setCenter(centerX, centerY)
+        centerScreenX = ZoomSegment.CENTER
+        centerScreenY = ZoomSegment.CENTER
+        pushCenter()
         showFocusMarker(binding.previewView.width / 2f, binding.previewView.height / 2f)
     }
 
@@ -1652,15 +1687,17 @@ class MainActivity : AppCompatActivity() {
             // Ucu 0/1 veriyoruz; golgeleyici zoom'a gore zaten kirpiyor, boylece
             // mevcut pay ne kadarsa o kadar genis kayar.
             CameraMode.PAN -> {
-                val fromX = if (zoomOut) 0f else 1f
-                val toX = if (zoomOut) 1f else 0f
+                // Uclar ekranda yatay olacak sekilde tanimlanir, sonra doku
+                // uzayina cevrilir; boylece "saga" gercekten saga kayar.
+                val (fromX, fromY) = screenToBuffer(if (zoomOut) 0f else 1f, centerScreenY)
+                val (toX, toY) = screenToBuffer(if (zoomOut) 1f else 0f, centerScreenY)
                 listOf(
-                    ZoomSegment.Hold(startZoom, 600, fromX, centerY),
+                    ZoomSegment.Hold(startZoom, 600, fromX, fromY),
                     ZoomSegment.Ramp(
                         startZoom, startZoom, total, curveInterpolator(),
-                        fromX, centerY, toX, centerY
+                        fromX, fromY, toX, toY
                     ),
-                    ZoomSegment.Hold(startZoom, 600, toX, centerY)
+                    ZoomSegment.Hold(startZoom, 600, toX, toY)
                 )
             }
             // Iki nokta: kullanicinin kurdugu iki kadraj arasinda gecis.
@@ -1670,13 +1707,16 @@ class MainActivity : AppCompatActivity() {
                 if (a == null || b == null) {
                     emptyList()
                 } else {
+                    // Kayitli kadrajlar ekran uzayindadir; doku uzayina cevrilir.
+                    val (ax, ay) = screenToBuffer(a.cx, a.cy)
+                    val (bx, by) = screenToBuffer(b.cx, b.cy)
                     listOf(
-                        ZoomSegment.Hold(a.zoom, 600, a.cx, a.cy),
+                        ZoomSegment.Hold(a.zoom, 600, ax, ay),
                         ZoomSegment.Ramp(
                             a.zoom, b.zoom, total, curveInterpolator(),
-                            a.cx, a.cy, b.cx, b.cy
+                            ax, ay, bx, by
                         ),
-                        ZoomSegment.Hold(b.zoom, 600, b.cx, b.cy)
+                        ZoomSegment.Hold(b.zoom, 600, bx, by)
                     )
                 }
             }

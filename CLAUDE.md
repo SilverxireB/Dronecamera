@@ -30,6 +30,11 @@ video çekimleri yapar. Kullanıcı dili: Türkçe. Cihaz: Honor Magic 8 Pro
   düşer. ÇÖZÜM: zoom aralığını tek bir lensin bölgesinde tut (`LensRange`):
   TELE = eşik+0.2 → max, MAIN = 1x → eşik-0.2 (`zoomBoundsFor`).
   Honor Magic 8 Pro'da telefoto TAM 3.7x'te (85mm) devreye giriyor — varsayılan eşik 3.7.
+- KOORDİNAT TUZAĞI: kameradan gelen kare SENSÖR yönünde (yatay) gelir; ekranda
+  dik görünmesi için döndürülür. Kırpma merkezi GL doku uzayındadır, dokunma ise
+  ekran uzayında — arada `screenToBuffer()` dönüşümü ŞART (yoksa sağa dokununca
+  aşağı kayar). Merkez ekran uzayında saklanır (`centerScreenX/Y`), doku uzayına
+  `pushCenter()` ile çevrilir.
 - UI TUZAĞI: dikey LinearLayout'a eklenen View varsayılan MATCH_PARENT genişlik alır;
   HorizontalScrollView içinde bu genişlik 0'a çöker ve yazı tek harfe kırpılır.
   Kodla üretilen her etikete AÇIKÇA WRAP_CONTENT layoutParams ver.
