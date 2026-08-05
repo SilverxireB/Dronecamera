@@ -1416,7 +1416,7 @@ class MainActivity : AppCompatActivity() {
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             val target = preferredViewer(view)
             if (target != null) {
-                view.setClassName(target.packageName, target.name)
+                view.setClassName(target.packageName, target.className)
                 if (runCatching { startActivity(view) }.isSuccess) return
             }
             // Acik hedef tutmadiysa sistemin kendi secimine birak.
