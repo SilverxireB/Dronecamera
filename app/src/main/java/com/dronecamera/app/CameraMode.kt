@@ -82,3 +82,14 @@ enum class CameraMode(val labelRes: Int) {
 
 /** Kullanicinin kurdugu bir kadraj: efektif zoom + kirpma merkezi. */
 data class FramePoint(val zoom: Float, val cx: Float, val cy: Float)
+
+/**
+ * Kadraj secme ekraninin hangi kadraji duzenledigi.
+ * START = ACILIS modunun baslangic cercevesi (zoom sabit, yalnizca yer secilir),
+ * SCENE_A/SCENE_B = IKI NOKTA modunun ilk ve son sahnesi (yer + zoom).
+ */
+enum class PickSlot(val labelRes: Int) {
+    START(R.string.pick_start),
+    SCENE_A(R.string.point_a),
+    SCENE_B(R.string.point_b)
+}

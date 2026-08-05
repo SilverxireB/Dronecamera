@@ -35,6 +35,12 @@ video çekimleri yapar. Kullanıcı dili: Türkçe. Cihaz: Honor Magic 8 Pro
   ekran uzayında — arada `screenToBuffer()` dönüşümü ŞART (yoksa sağa dokununca
   aşağı kayar). Merkez ekran uzayında saklanır (`centerScreenX/Y`), doku uzayına
   `pushCenter()` ile çevrilir.
+- KADRAJ SEÇME KURALI: yüksek zoomda ekranda görünmeyen bir yere dokunmak
+  imkânsız. Bu yüzden hedef/sahne seçimi ayrı bir ekranda yapılır: optik zoom
+  menzilin en geniş ucuna çekilir, kırpma 1'e alınır, seçilen kadraj çerçeve
+  olarak çizilir (`openPicker/placeRect`). Modlar arası iş bölümü: DRONE =
+  hep merkez, AÇILIŞ = tek nokta (HEDEF tuşu), İKİ NOKTA = iki sahne
+  (1./2. SAHNE tuşları), TIMELAPSE = dokunma yok.
 - UI TUZAĞI: dikey LinearLayout'a eklenen View varsayılan MATCH_PARENT genişlik alır;
   HorizontalScrollView içinde bu genişlik 0'a çöker ve yazı tek harfe kırpılır.
   Kodla üretilen her etikete AÇIKÇA WRAP_CONTENT layoutParams ver.

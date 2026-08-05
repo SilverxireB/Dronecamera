@@ -66,6 +66,15 @@
         app:constraint_referenced_ids="gridV1,gridV2,gridH1,gridH2" />
 
     <View
+        android:id="@+id/targetRectAlt"
+        android:layout_width="100dp"
+        android:layout_height="100dp"
+        android:background="@drawable/target_rect_alt"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <View
         android:id="@+id/targetRect"
         android:layout_width="100dp"
         android:layout_height="100dp"

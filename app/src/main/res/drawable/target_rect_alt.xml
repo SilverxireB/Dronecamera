@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Iki nokta modunda DIGER sahnenin cercevesi: sonuk, dolgusuz. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <stroke android:width="1dp" android:color="#66FFFFFF" android:dashWidth="6dp" android:dashGap="4dp" />
+    <corners android:radius="4dp" />
+</shape>

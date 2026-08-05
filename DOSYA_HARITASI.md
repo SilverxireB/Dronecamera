@@ -16,9 +16,13 @@ Bölge başlıklarıyla gezin (`// ---- ...` yorum satırları):
   `buildLensSegments()` + `updateLensLabels()/zoomBoundsFor()/fmtZoom()` (çiplerde
   gerçek aralık yazar: "TELE 4–15x"), `buildSettingsSheet()` (tüm ayar satırları),
   `addThresholdRow()` (canlı kalibrasyon SeekBar), `setupControls()`,
-  `addPresetRow()`, `togglePicker()/updateTargetRect()` (HEDEF: geniş kadrajı
-  gösterip başlangıç çerçevesini seçtirir — 20x'te görünmeyen noktaya dokunma
-  sorununun çözümü), `screenToBuffer()/pushCenter()` (KOORDİNAT TUZAĞI),
+  `addPresetRow()`, `openPicker()/closePicker()/pickerBasis()/pickerBounds()/
+  updateTargetRect()/placeRect()` (KADRAJ SEÇME: optik en geniş uca çekilip
+  kırpma 1 yapılır, üstüne çerçeve çizilir — 20x'te görünmeyen noktaya dokunma
+  sorununun çözümü; `PickSlot.START` = AÇILIŞ başlangıcı, `SCENE_A/SCENE_B` =
+  İKİ NOKTA sahneleri, sahnede iki parmak çerçeveyi büyütür),
+  `buildPointButtons()` (sahne tuşları: dokun-aç, tekrar dokun-kaydet),
+  `canMoveCenter()`, `screenToBuffer()/pushCenter()` (KOORDİNAT TUZAĞI),
   `toggleSettings()`, `applyModeToUi()`, `sizeSettingsSheet()`
   (yatayda panel yüksekliğini ekrana uydurur), `runRehearsal()` (PROVA: kayıtsız
   hızlı rampa önizlemesi), `updateGalleryThumb()/openLastVideo()`
@@ -30,11 +34,11 @@ Bölge başlıklarıyla gezin (`// ---- ...` yorum satırları):
 - `Cekim akisi`: `onShutter()`, `withCountdown()/cancelCountdown()`, `takePhoto()`,
   `startRecording(sequence?)`, `stopShot()`, `setRecordingUi()`
 
-### CameraMode.kt (~90 satır)
-`ZoomCurve`, `LensRange` (TELE/MAIN/FULL), `CameraMode` (DRONE/REVEAL/PAN/
+### CameraMode.kt (~100 satır)
+`ZoomCurve`, `LensRange` (TELE/MAIN/FULL), `CameraMode` (DRONE/REVEAL/
 BOOMERANG/STEP/TIMELAPSE/TWO_POINT/VERTIGO/DRONIE) + `usesFrontCamera/
 allowsLensRange/usesDirection/usesCurve/usesCenter`, `FramePoint`
-(İKİ NOKTA kadrajı: zoom + merkez).
+(İKİ NOKTA kadrajı: zoom + merkez), `PickSlot` (START/SCENE_A/SCENE_B).
 
 ### TimelapseRemuxer.kt (~110 satır)
 Timelapse'i YENİDEN KODLAMADAN hızlandırır: MediaExtractor→MediaMuxer ile

@@ -124,8 +124,8 @@ class MainActivity : AppCompatActivity() {
     /** IKI NOKTA modunda kullanicinin kurdugu kadrajlar. */
     private var pointA: FramePoint? = null
     private var pointB: FramePoint? = null
-    /** IKI NOKTA modunda parmakla kurulan canli efektif zoom. */
-    private var composeZoom = 0f
+    /** Kadraj secme ekraninda o an ayarlanan efektif zoom. */
+    private var pickZoom = 0f
 
     // Ayar paneli satirlari (moda gore gosterilip gizlenir)
     private var rowDuration: LinearLayout? = null
@@ -143,8 +143,13 @@ class MainActivity : AppCompatActivity() {
     /** Timelapse ham kaydi; hizlandirma icin yeniden paketlenip silinir. */
     private var timelapseTemp: File? = null
     private var isProcessing = false
-    /** Hedef secme ekrani acik mi (genis kadraj + cerceve). */
-    private var isPicking = false
+    /**
+     * Kadraj secme ekrani: acikken onizleme menzilin EN GENIS kadrajini
+     * gosterir ve uzerine secilen kadrajin cercevesi cizilir. 20x'te ekranda
+     * gorunmeyen bir noktayi secmek aksi halde mumkun degildi.
+     */
+    private var pickSlot: PickSlot? = null
+    private val isPicking: Boolean get() = pickSlot != null
     private var isShotRunning = false
     private var isRehearsing = false
     private var isCountingDown = false
@@ -466,7 +471,7 @@ class MainActivity : AppCompatActivity() {
                 if (isBusy() || mode == m) return@setOnClickListener
                 haptic(item)
                 mode = m
-                composeZoom = 0f
+                if (isPicking) closePicker(save = false)
                 savePrefs()
                 applyModeToUi()
                 refreshAll()
@@ -603,68 +608,35 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * IKI NOKTA modunun A/B kadraj tuslari.
-     * Dokun: kayitli kadraja git · Basili tut: mevcut kadraji kaydet.
+     * IKI NOKTA modunun sahne tuslari. Tek dokunus o sahnenin kadraj secme
+     * ekranini acar, ikinci dokunus kaydedip kapatir — basili tutma gibi
+     * gorunmez bir jest yok, ne yapildigi tusun ustunde yazar.
      */
     private fun buildPointButtons() {
-        val entries = listOf(
-            getString(R.string.point_a) to true,
-            getString(R.string.point_b) to false
-        )
-        val chips = entries.map { (label, isA) ->
-            val chip = makeChip(label)
+        val slots = listOf(PickSlot.SCENE_A, PickSlot.SCENE_B)
+        val chips = slots.map { slot ->
+            val chip = makeChip(getString(slot.labelRes))
             chip.setOnClickListener {
                 if (isBusy()) return@setOnClickListener
                 haptic(chip)
-                val point = if (isA) pointA else pointB
-                if (point == null) {
-                    Toast.makeText(this, getString(R.string.point_empty, label), Toast.LENGTH_SHORT)
-                        .show()
-                } else {
-                    centerScreenX = point.cx
-                    centerScreenY = point.cy
-                    pushCenter()
-                    composeZoom = point.zoom
-                    applyEffectiveZoom(point.zoom)
-                    Toast.makeText(
-                        this, getString(R.string.point_recalled, label), Toast.LENGTH_SHORT
-                    ).show()
-                }
-            }
-            chip.setOnLongClickListener {
-                if (!isBusy()) {
-                    haptic(chip)
-                    val zoom = if (composeZoom > 0f) composeZoom else currentEffectiveZoom()
-                    val point = FramePoint(zoom, centerScreenX, centerScreenY)
-                    if (isA) pointA = point else pointB = point
-                    savePrefs()
-                    refreshAll()
-                    applyModeToUi()
-                    Toast.makeText(
-                        this, getString(R.string.point_saved, label), Toast.LENGTH_SHORT
-                    ).show()
-                }
-                true
+                if (pickSlot == slot) closePicker(save = true) else openPicker(slot)
             }
             binding.pointRow.addView(chip)
-            Triple(label, isA, chip)
+            slot to chip
         }
         refreshers += {
-            chips.forEach { (label, isA, chip) ->
-                val point = if (isA) pointA else pointB
-                chip.text = if (point == null) {
-                    getString(R.string.point_slot_empty, label)
-                } else {
-                    getString(R.string.point_slot_set, label, fmtZoom(point.zoom))
+            chips.forEach { (slot, chip) ->
+                val label = getString(slot.labelRes)
+                val point = if (slot == PickSlot.SCENE_A) pointA else pointB
+                chip.text = when {
+                    pickSlot == slot -> getString(R.string.point_editing, label)
+                    point == null -> getString(R.string.point_slot_empty, label)
+                    else -> getString(R.string.point_slot_set, label, fmtZoom(point.zoom))
                 }
-                styleChip(chip, point != null)
+                styleChip(chip, pickSlot == slot || point != null)
             }
         }
     }
-
-    /** Onizlemede o an gecerli olan efektif zoom. */
-    private fun currentEffectiveZoom(): Float =
-        (camera?.cameraInfo?.zoomState?.value?.zoomRatio ?: 1f) * softZoomLevel
 
     private fun buildSettingsSheet() {
         val content = binding.settingsContent
@@ -957,7 +929,7 @@ class MainActivity : AppCompatActivity() {
         binding.progressRing.ringColor = ContextCompat.getColor(this, R.color.accentIce)
         binding.btnTarget.setOnClickListener {
             haptic(it)
-            togglePicker(!isPicking)
+            if (isPicking) closePicker(save = true) else openPicker(PickSlot.START)
         }
         binding.btnRehearse.setOnClickListener {
             haptic(it)
@@ -984,37 +956,36 @@ class MainActivity : AppCompatActivity() {
 
             // Confirmed: cift dokunusun ilk vurusunda merkez bosuna kaymasin.
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                if (mode.usesCenter) setFrameCenter(e.x, e.y)
+                if (canMoveCenter()) setFrameCenter(e.x, e.y)
                 return true
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                if (mode.usesCenter) resetFrameCenter()
+                if (canMoveCenter()) resetFrameCenter()
                 return true
             }
         })
-        // IKI NOKTA modunda parmakla efektif zoom kurulur; diger modlarda
-        // zoom rampanin kendisi tarafindan belirlendigi icin kapalidir.
+        // Parmakla buyutme yalnizca kadraj secme ekraninda ve yalnizca IKI
+        // NOKTA sahnelerinde anlamli: cerceve buyuyup kuculur. Diger her yerde
+        // zoom rampanin kendisi tarafindan belirlenir.
         val pinchDetector = ScaleGestureDetector(
             this,
             object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
                 override fun onScale(detector: ScaleGestureDetector): Boolean {
-                    if (mode != CameraMode.TWO_POINT || isBusy()) return false
-                    val state = camera?.cameraInfo?.zoomState?.value ?: return false
-                    val bounds = zoomBoundsFor(
-                        lensRange, state.minZoomRatio, state.maxZoomRatio
-                    )
-                    val base = if (composeZoom > 0f) composeZoom else currentEffectiveZoom()
-                    composeZoom = (base * detector.scaleFactor)
+                    val slot = pickSlot ?: return false
+                    if (slot == PickSlot.START || isBusy()) return false
+                    val bounds = pickerBounds()
+                    pickZoom = (pickZoom * detector.scaleFactor)
                         .coerceIn(bounds.first, bounds.second)
-                    applyEffectiveZoom(composeZoom)
+                    updateZoomBadge(pickZoom)
+                    updateTargetRect()
                     return true
                 }
             }
         )
         binding.previewView.setOnTouchListener { _, event ->
             if (!isBusy()) {
-                if (mode == CameraMode.TWO_POINT) pinchDetector.onTouchEvent(event)
+                if (isPicking) pinchDetector.onTouchEvent(event)
                 tapDetector.onTouchEvent(event)
             }
             // Dokunuslari her zaman tuketiyoruz: onizlemenin kendi odak/zoom
@@ -1061,56 +1032,137 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Hedef secme ekrani: kirpma kaldirilip menzilin en genis kadraji
-     * gosterilir ve uzerine cekimin baslangic cercevesi cizilir. 20x'te
-     * ekranda gorunmeyen bir noktayi secmek aksi halde mumkun degildi.
+     * Kadraj secme ekranini acar: kirpma kaldirilip menzilin en genis kadraji
+     * gosterilir, uzerine duzenlenen kadrajin cercevesi cizilir. Cerceve
+     * dokunarak tasinir, iki parmakla buyutulup kucultulur.
      */
-    private fun togglePicker(open: Boolean) {
-        if (open && (isBusy() || !mode.usesCenter)) return
-        isPicking = open
-        binding.btnTarget.text = getString(
-            if (open) R.string.target_done else R.string.target_pick
-        )
-        if (open) {
-            showGuide(R.string.target_guide)
-            // Genis kadraj: optik taban + kirpma yok.
-            rampOpticalBasis.takeIf { it > 0f }?.let {
-                camera?.cameraControl?.setZoomRatio(it)
-                lastOpticalRequested = it
+    private fun openPicker(slot: PickSlot) {
+        if (isBusy()) return
+        if (slot == PickSlot.START && !mode.usesCenter) return
+        if (slot != PickSlot.START && mode != CameraMode.TWO_POINT) return
+        if (isPicking) closePicker(save = true)
+
+        pickSlot = slot
+        val bounds = pickerBounds()
+        // Genis kadraj: optik menzilin en dibinde, kirpma yok.
+        rampOpticalBasis = pickerBasis()
+        when (slot) {
+            PickSlot.START -> pickZoom = resolveZoomRange()?.first ?: bounds.first
+            PickSlot.SCENE_A, PickSlot.SCENE_B -> {
+                val point = if (slot == PickSlot.SCENE_A) pointA else pointB
+                // Bos sahne: ilk sahne yakin, ikinci sahne genis baslasin ki
+                // varsayilan hareket bir "acilis" olsun.
+                val fallback = if (slot == PickSlot.SCENE_A) {
+                    min(bounds.first * 4f, bounds.second)
+                } else {
+                    bounds.first
+                }
+                pickZoom = point?.zoom ?: fallback
+                centerScreenX = point?.cx ?: ZoomSegment.CENTER
+                centerScreenY = point?.cy ?: ZoomSegment.CENTER
             }
-            softZoomLevel = 1f
-            zoomProcessor?.zoom = 1f
-            zoomProcessor?.setCenter(ZoomSegment.CENTER, ZoomSegment.CENTER)
-            updateTargetRect()
+        }
+        camera?.cameraControl?.setZoomRatio(rampOpticalBasis)
+        lastOpticalRequested = rampOpticalBasis
+        softZoomLevel = 1f
+        zoomProcessor?.zoom = 1f
+        zoomProcessor?.setCenter(ZoomSegment.CENTER, ZoomSegment.CENTER)
+        updateZoomBadge(pickZoom)
+        binding.btnTarget.text = getString(R.string.target_done)
+        refreshAll()
+        applyModeToUi()
+        updateTargetRect()
+    }
+
+    /** Secme ekranini kapatir; `save` ise duzenlenen kadraji saklar. */
+    private fun closePicker(save: Boolean) {
+        val slot = pickSlot ?: return
+        pickSlot = null
+        setVisible(binding.targetRect, false)
+        setVisible(binding.targetRectAlt, false)
+        binding.btnTarget.text = getString(R.string.target_pick)
+        if (save && slot != PickSlot.START) {
+            val point = FramePoint(pickZoom, centerScreenX, centerScreenY)
+            if (slot == PickSlot.SCENE_A) pointA = point else pointB = point
+            savePrefs()
+            Toast.makeText(
+                this, getString(R.string.point_saved, getString(slot.labelRes)),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+        refreshAll()
+        applyStartZoom()
+    }
+
+    /**
+     * Secme ekraninda optik zoom'un tutuldugu deger: menzilin en genis ucu.
+     * Kirpma 1 oldugu icin ekranda gorunen kadraj budur; cerceveler bu
+     * kadrajin uzerine olceklenir.
+     */
+    private fun pickerBasis(): Float = min(pickerBounds().first, currentOpticalCeiling())
+
+    /** Secme ekraninda gecerli zoom sinirlari (moda gore lens menzili). */
+    private fun pickerBounds(): Pair<Float, Float> {
+        val state = camera?.cameraInfo?.zoomState?.value ?: return 1f to 1f
+        return if (mode.allowsLensRange) {
+            zoomBoundsFor(lensRange, state.minZoomRatio, state.maxZoomRatio)
         } else {
-            setVisible(binding.targetRect, false)
-            applyStartZoom()
+            state.minZoomRatio to state.maxZoomRatio
         }
     }
 
-    /** Baslangic kadrajinin genis goruntu uzerindeki yerini cizer. */
+    /**
+     * Duzenlenen kadrajin (ve IKI NOKTA'da diger sahnenin) genis goruntu
+     * uzerindeki yerini cizer.
+     */
     private fun updateTargetRect() {
-        if (!isPicking) {
+        val slot = pickSlot
+        if (slot == null) {
             setVisible(binding.targetRect, false)
+            setVisible(binding.targetRectAlt, false)
             return
         }
-        val range = resolveZoomRange() ?: return
         val basis = rampOpticalBasis.takeIf { it > 0f } ?: return
-        val crop = (range.first / basis).coerceIn(1f, MAX_SOFT_CROP)
         val width = binding.previewView.width
         val height = binding.previewView.height
         if (width == 0 || height == 0) return
 
-        val rectWidth = (width / crop).toInt()
-        val rectHeight = (height / crop).toInt()
-        binding.targetRect.layoutParams = binding.targetRect.layoutParams.apply {
+        placeRect(binding.targetRect, pickZoom / basis, centerScreenX, centerScreenY, width, height)
+        // Diger sahne sonuk cerceveyle gosterilir: hareketin nereden nereye
+        // gidecegi tek bakista gorulur.
+        val other = when (slot) {
+            PickSlot.SCENE_A -> pointB
+            PickSlot.SCENE_B -> pointA
+            PickSlot.START -> null
+        }
+        if (other == null) {
+            setVisible(binding.targetRectAlt, false)
+        } else {
+            placeRect(binding.targetRectAlt, other.zoom / basis, other.cx, other.cy, width, height)
+        }
+    }
+
+    private fun placeRect(
+        view: View,
+        rawCrop: Float,
+        cx: Float,
+        cy: Float,
+        width: Int,
+        height: Int
+    ) {
+        val crop = rawCrop.coerceAtLeast(1f)
+        val rectWidth = (width / crop).toInt().coerceAtLeast(dp(28))
+        val rectHeight = (height / crop).toInt().coerceAtLeast(dp(28))
+        view.layoutParams = view.layoutParams.apply {
             this.width = rectWidth
             this.height = rectHeight
         }
-        binding.targetRect.translationX = centerScreenX * width - rectWidth / 2f
-        binding.targetRect.translationY = centerScreenY * height - rectHeight / 2f
-        binding.targetRect.requestLayout()
-        setVisible(binding.targetRect, true)
+        view.translationX = (cx * width - rectWidth / 2f)
+            .coerceIn(0f, (width - rectWidth).toFloat().coerceAtLeast(0f))
+        view.translationY = (cy * height - rectHeight / 2f)
+            .coerceIn(0f, (height - rectHeight).toFloat().coerceAtLeast(0f))
+        view.requestLayout()
+        setVisible(view, true)
     }
 
     /** Ekran uzayindaki merkezi doku uzayina cevirip islemciye gonderir. */
@@ -1120,6 +1172,13 @@ class MainActivity : AppCompatActivity() {
         centerY = bufferY
         zoomProcessor?.setCenter(centerX, centerY)
     }
+
+    /**
+     * Onizlemeye dokunmak kadraj merkezini tasiyabilir mi? Secme ekraninda her
+     * zaman evet. Disarida yalnizca ACILIS modunda; IKI NOKTA'da kadrajlar
+     * sahne tuslariyla kurulur, serbest dokunus orada kafa karistiriyordu.
+     */
+    private fun canMoveCenter(): Boolean = isPicking || mode == CameraMode.REVEAL
 
     /**
      * Kirpma penceresinin merkezini dokunulan noktaya tasir ve ayni noktaya
@@ -1134,7 +1193,7 @@ class MainActivity : AppCompatActivity() {
         centerScreenX = (x / width).coerceIn(0f, 1f)
         centerScreenY = (y / height).coerceIn(0f, 1f)
 
-        // Hedef secme ekraninda kirpma uygulanmaz; yalnizca cerceve tasinir.
+        // Secme ekraninda kirpma uygulanmaz; yalnizca cerceve tasinir.
         if (isPicking) {
             updateTargetRect()
             showFocusMarker(x, y)
@@ -1159,6 +1218,11 @@ class MainActivity : AppCompatActivity() {
     private fun resetFrameCenter() {
         centerScreenX = ZoomSegment.CENTER
         centerScreenY = ZoomSegment.CENTER
+        if (isPicking) {
+            updateTargetRect()
+            showFocusMarker(binding.previewView.width / 2f, binding.previewView.height / 2f)
+            return
+        }
         pushCenter()
         showFocusMarker(binding.previewView.width / 2f, binding.previewView.height / 2f)
     }
@@ -1220,6 +1284,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        // Kamera yeniden baglanacagi icin secme ekrani kapanir; kurulan kadraj
+        // kaybolmasin diye kaydedilerek.
+        if (isPicking) closePicker(save = true)
         sizeSettingsSheet()
         applyOrientationLayout()
         // Yalnizca hedef yonu guncellemek yetmiyor: GPU efekti devredeyken
@@ -1230,6 +1297,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (isPicking) closePicker(save = true)
         // Uygulama one dondugunde kamera yeniden baglanabiliyor; optik zoom,
         // kirpma ve rozet birlikte yeniden kurulsun.
         if (!isBusy()) {
@@ -1336,8 +1404,9 @@ class MainActivity : AppCompatActivity() {
     private fun applyModeToUi() {
         setVisible(binding.lensScroll, mode.allowsLensRange)
         setVisible(binding.pointRow, mode == CameraMode.TWO_POINT)
-        setVisible(binding.btnTarget, mode.usesCenter)
-        if (!mode.usesCenter && isPicking) togglePicker(false)
+        // HEDEF tusu yalnizca ACILIS icin; IKI NOKTA'da secim sahne tuslarindan.
+        setVisible(binding.btnTarget, mode.usesCenter && mode != CameraMode.TWO_POINT)
+        if (!mode.usesCenter && isPicking) closePicker(save = false)
         binding.gridGroup.visibility = gridVisibility()
 
         // Ayar satirlari yalnizca ilgili modlarda gorunur.
@@ -1353,6 +1422,13 @@ class MainActivity : AppCompatActivity() {
         rowExposure?.let { setVisible(it, true) }
 
         updateSummary()
+
+        // Secme ekrani acikken rehber satiri o isi anlatir.
+        pickSlot?.let {
+            binding.guideText.text = getString(R.string.pick_guide, getString(it.labelRes))
+            binding.guideText.visibility = View.VISIBLE
+            return
+        }
 
         when (mode) {
             CameraMode.VERTIGO -> showGuide(R.string.vertigo_guide)
@@ -1389,7 +1465,7 @@ class MainActivity : AppCompatActivity() {
             val a = pointA
             val b = pointB
             parts += if (a != null && b != null) {
-                "${fmtZoom(a.zoom)}x → ${fmtZoom(b.zoom)}x"
+                "1. ${fmtZoom(a.zoom)}x → 2. ${fmtZoom(b.zoom)}x"
             } else {
                 getString(R.string.point_missing)
             }
@@ -1591,18 +1667,24 @@ class MainActivity : AppCompatActivity() {
     /** Onizlemeyi cekimin baslayacagi zoom degerine goturur (kadraj icin). */
     private fun applyStartZoom() {
         if (isBusy()) return
-        val range = resolveZoomRange() ?: return
-        rampOpticalBasis = opticalBasisFor(range)
+        // Secme ekrani acikken taban ONIZLEMEYE aittir (en genis kadraj);
+        // cekimin tabani kapaninca yeniden hesaplanir.
         if (isPicking) {
+            rampOpticalBasis = pickerBasis()
             updateTargetRect()
             return
         }
-        val target = if (mode == CameraMode.TWO_POINT && composeZoom > 0f) {
-            composeZoom
-        } else {
-            range.first
+        val range = resolveZoomRange() ?: return
+        rampOpticalBasis = opticalBasisFor(range)
+        // IKI NOKTA'da onizleme cekimin BASLAYACAGI kadraji (1. sahne)
+        // gosterir: merkez de o sahneden alinir.
+        if (mode == CameraMode.TWO_POINT) {
+            pointA?.let {
+                centerScreenX = it.cx
+                centerScreenY = it.cy
+            }
         }
-        applyEffectiveZoom(target)
+        applyEffectiveZoom(range.first)
         applyModeToUi()
     }
 
@@ -1816,11 +1898,13 @@ class MainActivity : AppCompatActivity() {
         }
         if (settingsOpen) toggleSettings(false)
 
+        // Secme ekrani acikken deklansore basmak kadraji kaydedip cekime gecer.
+        if (isPicking) closePicker(save = true)
+
         if (mode == CameraMode.TWO_POINT && (pointA == null || pointB == null)) {
             Toast.makeText(this, R.string.point_missing, Toast.LENGTH_LONG).show()
             return
         }
-        if (isPicking) togglePicker(false)
         val range = resolveZoomRange() ?: return
         rampOpticalBasis = opticalBasisFor(range)
         val sequence = buildSequence(range.first, range.second)
