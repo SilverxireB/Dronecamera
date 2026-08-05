@@ -5,6 +5,8 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.ComponentName
+import android.content.ContentUris
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -190,6 +192,7 @@ class MainActivity : AppCompatActivity() {
         buildSettingsSheet()
         setupControls()
         refreshAll()
+        restoreLastVideo()
 
         if (hasPermission(Manifest.permission.CAMERA)) {
             startCamera()
@@ -1399,53 +1402,84 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Galeriyi acar. CATEGORY_APP_GALLERY cogu cihazda Google Fotograflar'a
-     * dusuyor; once CIHAZIN KENDI galerisi denenir (once bilinen paketler,
-     * sonra videoyu acabilen sistem uygulamalari), Google Fotograflar en son
-     * caredir.
+     * Kucuk resme dokunmak SON VIDEOYU galeride acar (galeri uygulamasini
+     * degil). Videoyu acabilen etkinlikler arasindan cihazin kendi galerisi
+     * secilir ve ACIKCA o etkinlik baslatilir: paket adi vermek yetmiyordu,
+     * bazi galeriler istegi kendi giris ekranina yonlendiriyor.
      */
     private fun openGallery() {
         if (isPicking) return
-        val target = builtInGalleryPackage()
-        if (target != null && launchGallery(target)) return
-        if (playLastVideo()) return
-        val gallery = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_GALLERY)
-        if (runCatching { startActivity(gallery) }.isSuccess) return
-        Toast.makeText(this, R.string.no_video_app, Toast.LENGTH_SHORT).show()
-    }
-
-    /** Son videoyu verilen pakette acar, o yoksa paketin kendisini baslatir. */
-    private fun launchGallery(pkg: String): Boolean {
         val uri = lastVideoUri
         if (uri != null) {
             val view = Intent(Intent.ACTION_VIEW)
                 .setDataAndType(uri, "video/mp4")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                .setPackage(pkg)
-            if (runCatching { startActivity(view) }.isSuccess) return true
+            val target = preferredViewer(view)
+            if (target != null) {
+                view.setClassName(target.packageName, target.name)
+                if (runCatching { startActivity(view) }.isSuccess) return
+            }
+            // Acik hedef tutmadiysa sistemin kendi secimine birak.
+            if (playLastVideo()) return
         }
-        val launch = packageManager.getLaunchIntentForPackage(pkg) ?: return false
-        return runCatching { startActivity(launch) }.isSuccess
+        // Hic video yoksa (veya acilamadiysa) galeri uygulamasini ac.
+        KNOWN_GALLERY_PACKAGES.forEach { pkg ->
+            val launch = packageManager.getLaunchIntentForPackage(pkg) ?: return@forEach
+            if (runCatching { startActivity(launch) }.isSuccess) return
+        }
+        val gallery = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_GALLERY)
+        if (runCatching { startActivity(gallery) }.isSuccess) return
+        Toast.makeText(this, R.string.no_video_app, Toast.LENGTH_SHORT).show()
     }
 
     /**
-     * Cihazin yerlesik galerisi. Once bilinen ureticiler (bu cihazda Honor),
-     * sonra videoyu acabilen sistem uygulamalarindan Google olmayan ilki.
+     * Videoyu acabilen etkinlikler icinden en uygunu: once bilinen yerlesik
+     * galeriler, sonra Google disi sistem uygulamalari, en son kalan ilki.
      */
-    private fun builtInGalleryPackage(): String? {
-        val installed = packageManager.getInstalledApplications(0).associateBy { it.packageName }
-        KNOWN_GALLERY_PACKAGES.firstOrNull { installed.containsKey(it) }?.let { return it }
-
-        val probe = Intent(Intent.ACTION_VIEW).setDataAndType(
-            lastVideoUri ?: MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "video/mp4"
-        )
-        return packageManager.queryIntentActivities(probe, 0)
-            .map { it.activityInfo.packageName }
-            .firstOrNull { name ->
-                if (name.startsWith("com.google.")) return@firstOrNull false
-                val info = installed[name] ?: return@firstOrNull false
+    private fun preferredViewer(intent: Intent): ComponentName? {
+        val matches = packageManager.queryIntentActivities(intent, 0)
+        if (matches.isEmpty()) return null
+        val known = matches.firstOrNull { KNOWN_GALLERY_PACKAGES.contains(it.activityInfo.packageName) }
+        val system = matches.firstOrNull {
+            val info = it.activityInfo.applicationInfo
+            !it.activityInfo.packageName.startsWith("com.google.") &&
                 (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+        }
+        val chosen = (known ?: system ?: matches.first()).activityInfo
+        return ComponentName(chosen.packageName, chosen.name)
+    }
+
+    /**
+     * Uygulama acilirken son cekimi geri yukler: kucuk resim ve "galeride ac"
+     * yeniden baslatmadan sonra da calissin.
+     */
+    private fun restoreLastVideo() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        Thread {
+            val uri = runCatching {
+                contentResolver.query(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    arrayOf(MediaStore.Video.Media._ID),
+                    "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?",
+                    arrayOf("Movies/DroneCamera%"),
+                    "${MediaStore.Video.Media.DATE_ADDED} DESC"
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        ContentUris.withAppendedId(
+                            MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0)
+                        )
+                    } else {
+                        null
+                    }
+                }
+            }.getOrNull() ?: return@Thread
+            runOnUiThread {
+                if (!isFinishing && lastVideoUri == null) {
+                    lastVideoUri = uri
+                    updateGalleryThumb()
+                }
             }
+        }.start()
     }
 
     /** Son cekilen videoyu dogrudan oynatir (kucuk resme basili tutunca). */
