@@ -16,7 +16,10 @@ Bölge başlıklarıyla gezin (`// ---- ...` yorum satırları):
   `buildLensSegments()` + `updateLensLabels()/zoomBoundsFor()/fmtZoom()` (çiplerde
   gerçek aralık yazar: "TELE 4–15x"), `buildSettingsSheet()` (tüm ayar satırları),
   `addThresholdRow()` (canlı kalibrasyon SeekBar), `setupControls()`,
-  `addPresetRow()`, `toggleSettings()`, `applyModeToUi()`, `sizeSettingsSheet()`
+  `addPresetRow()`, `togglePicker()/updateTargetRect()` (HEDEF: geniş kadrajı
+  gösterip başlangıç çerçevesini seçtirir — 20x'te görünmeyen noktaya dokunma
+  sorununun çözümü), `screenToBuffer()/pushCenter()` (KOORDİNAT TUZAĞI),
+  `toggleSettings()`, `applyModeToUi()`, `sizeSettingsSheet()`
   (yatayda panel yüksekliğini ekrana uydurur), `runRehearsal()` (PROVA: kayıtsız
   hızlı rampa önizlemesi), `updateGalleryThumb()/openLastVideo()`
 - `Kamera`: `startCamera()`, `bindCamera()` (sabitleme için 3 kademeli fallback:
@@ -30,7 +33,7 @@ Bölge başlıklarıyla gezin (`// ---- ...` yorum satırları):
 ### CameraMode.kt (~90 satır)
 `ZoomCurve`, `LensRange` (TELE/MAIN/FULL), `CameraMode` (DRONE/REVEAL/PAN/
 BOOMERANG/STEP/TIMELAPSE/TWO_POINT/VERTIGO/DRONIE) + `usesFrontCamera/
-allowsLensRange/usesDirection/usesCurve/directionIsHorizontal`, `FramePoint`
+allowsLensRange/usesDirection/usesCurve/usesCenter`, `FramePoint`
 (İKİ NOKTA kadrajı: zoom + merkez).
 
 ### TimelapseRemuxer.kt (~110 satır)

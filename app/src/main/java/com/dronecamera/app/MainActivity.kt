@@ -143,6 +143,8 @@ class MainActivity : AppCompatActivity() {
     /** Timelapse ham kaydi; hizlandirma icin yeniden paketlenip silinir. */
     private var timelapseTemp: File? = null
     private var isProcessing = false
+    /** Hedef secme ekrani acik mi (genis kadraj + cerceve). */
+    private var isPicking = false
     private var isShotRunning = false
     private var isRehearsing = false
     private var isCountingDown = false
@@ -568,8 +570,7 @@ class MainActivity : AppCompatActivity() {
      * zoom sabittir; digerlerinde rampanin en dusuk ucudur.
      */
     private fun opticalBasisFor(range: Pair<Float, Float>): Float {
-        val lowest = if (mode == CameraMode.PAN) range.first else min(range.first, range.second)
-        return min(lowest, currentOpticalCeiling())
+        return min(min(range.first, range.second), currentOpticalCeiling())
     }
 
     private fun currentOpticalCeiling(): Float {
@@ -778,12 +779,7 @@ class MainActivity : AppCompatActivity() {
         container.addView(row)
         refreshers += {
             chips.forEach { (forward, chip) ->
-                chip.text = when {
-                    mode.directionIsHorizontal && forward -> getString(R.string.dir_right)
-                    mode.directionIsHorizontal -> getString(R.string.dir_left)
-                    forward -> getString(R.string.dir_out)
-                    else -> getString(R.string.dir_in)
-                }
+                chip.text = getString(if (forward) R.string.dir_out else R.string.dir_in)
                 styleChip(chip, forward == zoomOut)
             }
         }
@@ -959,6 +955,10 @@ class MainActivity : AppCompatActivity() {
         binding.settingsScrim.setOnClickListener { toggleSettings(false) }
         binding.progressRing.ringWidth = dp(4).toFloat()
         binding.progressRing.ringColor = ContextCompat.getColor(this, R.color.accentIce)
+        binding.btnTarget.setOnClickListener {
+            haptic(it)
+            togglePicker(!isPicking)
+        }
         binding.btnRehearse.setOnClickListener {
             haptic(it)
             runRehearsal()
@@ -984,12 +984,12 @@ class MainActivity : AppCompatActivity() {
 
             // Confirmed: cift dokunusun ilk vurusunda merkez bosuna kaymasin.
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                setFrameCenter(e.x, e.y)
+                if (mode.usesCenter) setFrameCenter(e.x, e.y)
                 return true
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                resetFrameCenter()
+                if (mode.usesCenter) resetFrameCenter()
                 return true
             }
         })
@@ -1060,6 +1060,59 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Hedef secme ekrani: kirpma kaldirilip menzilin en genis kadraji
+     * gosterilir ve uzerine cekimin baslangic cercevesi cizilir. 20x'te
+     * ekranda gorunmeyen bir noktayi secmek aksi halde mumkun degildi.
+     */
+    private fun togglePicker(open: Boolean) {
+        if (open && (isBusy() || !mode.usesCenter)) return
+        isPicking = open
+        binding.btnTarget.text = getString(
+            if (open) R.string.target_done else R.string.target_pick
+        )
+        if (open) {
+            showGuide(R.string.target_guide)
+            // Genis kadraj: optik taban + kirpma yok.
+            rampOpticalBasis.takeIf { it > 0f }?.let {
+                camera?.cameraControl?.setZoomRatio(it)
+                lastOpticalRequested = it
+            }
+            softZoomLevel = 1f
+            zoomProcessor?.zoom = 1f
+            zoomProcessor?.setCenter(ZoomSegment.CENTER, ZoomSegment.CENTER)
+            updateTargetRect()
+        } else {
+            setVisible(binding.targetRect, false)
+            applyStartZoom()
+        }
+    }
+
+    /** Baslangic kadrajinin genis goruntu uzerindeki yerini cizer. */
+    private fun updateTargetRect() {
+        if (!isPicking) {
+            setVisible(binding.targetRect, false)
+            return
+        }
+        val range = resolveZoomRange() ?: return
+        val basis = rampOpticalBasis.takeIf { it > 0f } ?: return
+        val crop = (range.first / basis).coerceIn(1f, MAX_SOFT_CROP)
+        val width = binding.previewView.width
+        val height = binding.previewView.height
+        if (width == 0 || height == 0) return
+
+        val rectWidth = (width / crop).toInt()
+        val rectHeight = (height / crop).toInt()
+        binding.targetRect.layoutParams = binding.targetRect.layoutParams.apply {
+            this.width = rectWidth
+            this.height = rectHeight
+        }
+        binding.targetRect.translationX = centerScreenX * width - rectWidth / 2f
+        binding.targetRect.translationY = centerScreenY * height - rectHeight / 2f
+        binding.targetRect.requestLayout()
+        setVisible(binding.targetRect, true)
+    }
+
     /** Ekran uzayindaki merkezi doku uzayina cevirip islemciye gonderir. */
     private fun pushCenter() {
         val (bufferX, bufferY) = screenToBuffer(centerScreenX, centerScreenY)
@@ -1080,6 +1133,13 @@ class MainActivity : AppCompatActivity() {
 
         centerScreenX = (x / width).coerceIn(0f, 1f)
         centerScreenY = (y / height).coerceIn(0f, 1f)
+
+        // Hedef secme ekraninda kirpma uygulanmaz; yalnizca cerceve tasinir.
+        if (isPicking) {
+            updateTargetRect()
+            showFocusMarker(x, y)
+            return
+        }
         pushCenter()
 
         // Kirpma penceresi tum kareyi kapliyorsa merkezi kaydiracak pay yoktur.
@@ -1276,6 +1336,8 @@ class MainActivity : AppCompatActivity() {
     private fun applyModeToUi() {
         setVisible(binding.lensScroll, mode.allowsLensRange)
         setVisible(binding.pointRow, mode == CameraMode.TWO_POINT)
+        setVisible(binding.btnTarget, mode.usesCenter)
+        if (!mode.usesCenter && isPicking) togglePicker(false)
         binding.gridGroup.visibility = gridVisibility()
 
         // Ayar satirlari yalnizca ilgili modlarda gorunur.
@@ -1296,7 +1358,6 @@ class MainActivity : AppCompatActivity() {
             CameraMode.VERTIGO -> showGuide(R.string.vertigo_guide)
             CameraMode.DRONIE -> showGuide(R.string.dronie_guide)
             CameraMode.REVEAL -> showGuide(R.string.reveal_guide)
-            CameraMode.PAN -> showGuide(R.string.pan_guide)
             CameraMode.TWO_POINT -> showGuide(R.string.two_point_guide)
             CameraMode.TIMELAPSE -> {
                 val totalSec = durationSec * timelapseSpeed
@@ -1334,13 +1395,7 @@ class MainActivity : AppCompatActivity() {
             }
         } else if (state != null) {
             val range = resolveZoomRange()
-            if (range != null) {
-                parts += if (mode == CameraMode.PAN) {
-                    "${fmtZoom(range.first)}x"
-                } else {
-                    "${fmtZoom(range.first)}–${fmtZoom(range.second)}x"
-                }
-            }
+            if (range != null) parts += "${fmtZoom(range.first)}–${fmtZoom(range.second)}x"
         }
 
         parts += if (mode == CameraMode.TIMELAPSE) {
@@ -1349,12 +1404,7 @@ class MainActivity : AppCompatActivity() {
             getString(R.string.duration_fmt, durationSec)
         }
         if (mode.usesDirection) {
-            parts += when {
-                mode.directionIsHorizontal && zoomOut -> getString(R.string.dir_right)
-                mode.directionIsHorizontal -> getString(R.string.dir_left)
-                zoomOut -> getString(R.string.dir_out)
-                else -> getString(R.string.dir_in)
-            }
+            parts += getString(if (zoomOut) R.string.dir_out else R.string.dir_in)
         }
         if (mode.usesCurve) parts += getString(curve.labelRes)
 
@@ -1543,6 +1593,10 @@ class MainActivity : AppCompatActivity() {
         if (isBusy()) return
         val range = resolveZoomRange() ?: return
         rampOpticalBasis = opticalBasisFor(range)
+        if (isPicking) {
+            updateTargetRect()
+            return
+        }
         val target = if (mode == CameraMode.TWO_POINT && composeZoom > 0f) {
             composeZoom
         } else {
@@ -1666,13 +1720,11 @@ class MainActivity : AppCompatActivity() {
     private fun buildSequence(startZoom: Float, endZoom: Float): List<ZoomSegment> {
         val total = durationSec * 1000L
         return when (mode) {
+            // DRONE klasik ortadan zoom; merkez secimi ACILIS modunda.
             CameraMode.DRONE, CameraMode.DRONIE -> listOf(
-                ZoomSegment.Hold(startZoom, 800, centerX, centerY),
-                ZoomSegment.Ramp(
-                    startZoom, endZoom, total, curveInterpolator(),
-                    centerX, centerY, centerX, centerY
-                ),
-                ZoomSegment.Hold(endZoom, 800, centerX, centerY)
+                ZoomSegment.Hold(startZoom, 800),
+                ZoomSegment.Ramp(startZoom, endZoom, total, curveInterpolator()),
+                ZoomSegment.Hold(endZoom, 800)
             )
             // Acilis: secilen noktadan baslar, genise acilirken merkez de ortaya kayar.
             CameraMode.REVEAL -> listOf(
@@ -1686,20 +1738,6 @@ class MainActivity : AppCompatActivity() {
             // Kaydirma: zoom sabit, kirpma penceresi bir uctan digerine gider.
             // Ucu 0/1 veriyoruz; golgeleyici zoom'a gore zaten kirpiyor, boylece
             // mevcut pay ne kadarsa o kadar genis kayar.
-            CameraMode.PAN -> {
-                // Uclar ekranda yatay olacak sekilde tanimlanir, sonra doku
-                // uzayina cevrilir; boylece "saga" gercekten saga kayar.
-                val (fromX, fromY) = screenToBuffer(if (zoomOut) 0f else 1f, centerScreenY)
-                val (toX, toY) = screenToBuffer(if (zoomOut) 1f else 0f, centerScreenY)
-                listOf(
-                    ZoomSegment.Hold(startZoom, 600, fromX, fromY),
-                    ZoomSegment.Ramp(
-                        startZoom, startZoom, total, curveInterpolator(),
-                        fromX, fromY, toX, toY
-                    ),
-                    ZoomSegment.Hold(startZoom, 600, toX, toY)
-                )
-            }
             // Iki nokta: kullanicinin kurdugu iki kadraj arasinda gecis.
             CameraMode.TWO_POINT -> {
                 val a = pointA
@@ -1721,17 +1759,11 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             CameraMode.BOOMERANG -> listOf(
-                ZoomSegment.Hold(startZoom, 500, centerX, centerY),
-                ZoomSegment.Ramp(
-                    startZoom, endZoom, total / 2, curveInterpolator(),
-                    centerX, centerY, centerX, centerY
-                ),
-                ZoomSegment.Hold(endZoom, 500, centerX, centerY),
-                ZoomSegment.Ramp(
-                    endZoom, startZoom, total / 2, curveInterpolator(),
-                    centerX, centerY, centerX, centerY
-                ),
-                ZoomSegment.Hold(startZoom, 500, centerX, centerY)
+                ZoomSegment.Hold(startZoom, 500),
+                ZoomSegment.Ramp(startZoom, endZoom, total / 2, curveInterpolator()),
+                ZoomSegment.Hold(endZoom, 500),
+                ZoomSegment.Ramp(endZoom, startZoom, total / 2, curveInterpolator()),
+                ZoomSegment.Hold(startZoom, 500)
             )
             CameraMode.STEP -> buildStepSequence(startZoom, endZoom, total)
             CameraMode.TIMELAPSE -> listOf(
@@ -1788,11 +1820,14 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.point_missing, Toast.LENGTH_LONG).show()
             return
         }
+        if (isPicking) togglePicker(false)
         val range = resolveZoomRange() ?: return
         rampOpticalBasis = opticalBasisFor(range)
-        applyEffectiveZoom(range.first)
         val sequence = buildSequence(range.first, range.second)
         if (sequence.isEmpty()) return
+        // Kayit sekansin ILK KARESINDEN baslasin: zoom ve merkez birlikte
+        // kurulur, aksi halde video baska bir kadrajdan baslayip atliyordu.
+        applySequenceStart(sequence)
 
         withCountdown {
             // Odak/pozlama kilidi kayit BASLAMADAN once verilir ve oturmasi
@@ -1918,6 +1953,19 @@ class MainActivity : AppCompatActivity() {
      * puruzsuzdur. "Net" motorda optik zoom rampayi takip eder (daha keskin
      * goruntu), kirpma da istekler arasindaki bosluklari doldurur.
      */
+    /** Sekansin sifirinci anindaki kadraji (zoom + merkez) onizlemeye uygular. */
+    private fun applySequenceStart(sequence: List<ZoomSegment>) {
+        val basis = rampOpticalBasis.takeIf { it > 0f } ?: return
+        val frame = FloatArray(3)
+        sequence.frameAt(0L, frame)
+        lastOpticalRequested = basis
+        camera?.cameraControl?.setZoomRatio(basis)
+        softZoomLevel = (frame[0] / basis).coerceIn(1f, MAX_SOFT_CROP)
+        zoomProcessor?.zoom = softZoomLevel
+        zoomProcessor?.setCenter(frame[1], frame[2])
+        updateZoomBadge(frame[0])
+    }
+
     private fun startZoomSequence(sequence: List<ZoomSegment>) {
         val processor = zoomProcessor
         val softwareRamp = processor != null && rampOpticalBasis > 0f

@@ -38,9 +38,6 @@ enum class CameraMode(val labelRes: Int) {
     /** Ozneden acilis: secilen noktadan baslayip genise ve ortaya acilir. */
     REVEAL(R.string.mode_reveal),
 
-    /** Zoom sabit, kirpma penceresi yatay kayar (drone suzulmesi). */
-    PAN(R.string.mode_pan),
-
     /** Gidis-donus zoom. */
     BOOMERANG(R.string.mode_boomerang),
 
@@ -66,17 +63,21 @@ enum class CameraMode(val labelRes: Int) {
     val allowsLensRange: Boolean
         get() = this != VERTIGO && this != DRONIE
 
-    /** Yon secimi (uzaklasma/yaklasma ya da saga/sola) bu modda anlamli mi? */
+    /** Yon secimi (uzaklasma/yaklasma) bu modda anlamli mi? */
     val usesDirection: Boolean
         get() = this != TWO_POINT && this != VERTIGO && this != DRONIE
+
+    /**
+     * Kadraj merkezi secimi bu modda anlamli mi? DRONE her zaman ortadan
+     * calisir; merkez secimi yalnizca acilis ve iki nokta modlarinda
+     * kullanilir, boylece modlar birbirinin ayni olmaz.
+     */
+    val usesCenter: Boolean
+        get() = this == REVEAL || this == TWO_POINT
 
     /** Hiz egrisi secilebilir mi (timelapse her zaman dogrusaldir)? */
     val usesCurve: Boolean
         get() = this != TIMELAPSE
-
-    /** Yon secimi yatay kaydirma anlamina mi geliyor? */
-    val directionIsHorizontal: Boolean
-        get() = this == PAN
 }
 
 /** Kullanicinin kurdugu bir kadraj: efektif zoom + kirpma merkezi. */

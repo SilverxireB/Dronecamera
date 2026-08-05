@@ -66,6 +66,15 @@
         app:constraint_referenced_ids="gridV1,gridV2,gridH1,gridH2" />
 
     <View
+        android:id="@+id/targetRect"
+        android:layout_width="100dp"
+        android:layout_height="100dp"
+        android:background="@drawable/target_rect"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <View
         android:id="@+id/focusMarker"
         android:layout_width="70dp"
         android:layout_height="70dp"
@@ -125,6 +134,20 @@
             android:text="@string/zoom_placeholder"
             android:textColor="@color/textPrimary"
             android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/btnTarget"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/chip_bg"
+            android:letterSpacing="0.08"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="4dp"
+            android:text="@string/target_pick"
+            android:textColor="@color/textSecondary"
+            android:textSize="11sp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/btnRehearse"

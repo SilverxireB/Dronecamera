@@ -5,7 +5,6 @@
     <!-- Modlar -->
     <string name="mode_drone">DRONE</string>
     <string name="mode_reveal">AÇILIŞ</string>
-    <string name="mode_pan">KAYDIRMA</string>
     <string name="mode_two_point">İKİ NOKTA</string>
     <string name="mode_boomerang">BUMERANG</string>
     <string name="mode_step">KADEMELİ</string>
@@ -58,6 +57,9 @@
     <string name="opt_mute_title">Sessiz çekim</string>
     <string name="opt_mute_summary">Ses kaydedilmez (rüzgâr gürültüsü olmaz)</string>
     <string name="rehearse">PROVA</string>
+    <string name="target_pick">HEDEF</string>
+    <string name="target_done">BİTİR</string>
+    <string name="target_guide">Geniş kadrajı görüyorsun · çerçeveyi istediğin yere dokunarak taşı, sonra BİTİR</string>
     <string name="rehearse_running">Prova…</string>
     <string name="desc_gallery">Son çekim</string>
     <string name="no_video_app">Videoyu açacak uygulama bulunamadı</string>
@@ -66,8 +68,6 @@
     <string name="duration_fmt">%d sn</string>
     <string name="dir_out">Uzaklaşma</string>
     <string name="dir_in">Yaklaşma</string>
-    <string name="dir_right">Sağa</string>
-    <string name="dir_left">Sola</string>
     <string name="curve_cinematic">Sinematik</string>
     <string name="curve_linear">Sabit</string>
     <string name="countdown_off">Kapalı</string>
@@ -107,8 +107,7 @@
 
     <!-- Rehberler -->
     <string name="vertigo_guide">Kayıt boyunca özneye doğru sabit hızda yürü</string>
-    <string name="reveal_guide">AÇILIŞ: dokunduğun nokta başlangıç kadrajının merkezi olur, çekim oradan geniş açıya açılır</string>
-    <string name="pan_guide">KAYDIRMA: zoom sabit kalır, kadraj yatay süzülür · kayma payı yazılım zoom kadar (+3x daha geniş)</string>
+    <string name="reveal_guide">AÇILIŞ: çekim seçtiğin noktadan başlar, geniş açıya açılır · noktayı HEDEF ile seç</string>
     <string name="two_point_guide">İKİ NOKTA: 1) parmakla zoom, dokunarak merkez  2) A\'yı BASILI TUT  3) yeni kadraj kur, B\'yi BASILI TUT  4) çek</string>
     <string name="dronie_guide">Telefonu yüzüne yakın tut, çekim uzaklaşarak açılır</string>
 
