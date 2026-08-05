@@ -1248,9 +1248,18 @@ class MainActivity : AppCompatActivity() {
         setVisible(view, true)
     }
 
-    /** Ekran uzayindaki merkezi doku uzayina cevirip islemciye gonderir. */
+    /**
+     * Ekran uzayindaki merkezi doku uzayina cevirip islemciye gonderir.
+     *
+     * Merkez alani modlar arasinda ORTAK oldugu icin, kadraj merkezini
+     * kullanmayan modlarda (DRONE, TIMELAPSE...) her zaman ortasi gonderilir:
+     * ACILIS'ta secilen baslangic karesi DRONE'a sizmasin. Secim saklanir,
+     * ACILIS'a donunce geri gelir.
+     */
     private fun pushCenter() {
-        val (bufferX, bufferY) = screenToBuffer(centerScreenX, centerScreenY)
+        val screenX = if (mode.usesCenter) centerScreenX else ZoomSegment.CENTER
+        val screenY = if (mode.usesCenter) centerScreenY else ZoomSegment.CENTER
+        val (bufferX, bufferY) = screenToBuffer(screenX, screenY)
         centerX = bufferX
         centerY = bufferY
         zoomProcessor?.setCenter(centerX, centerY)
