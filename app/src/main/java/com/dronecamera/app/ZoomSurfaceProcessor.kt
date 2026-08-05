@@ -64,25 +64,25 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
     }
 
     /**
-     * Timelapse: video cikisina karelerin yalnizca [scale] katinda biri
-     * gonderilir ve zaman damgalari ayni oranda sikistirilir; sonuc [scale]
-     * kat hizli oynayan bir video olur. Onizleme gercek zamanli kalir.
+     * Timelapse: video cikisina karelerin yalnizca [skip] katinda biri
+     * gonderilir. Zaman damgalarina DOKUNULMAZ — hizlandirma, kayit bitince
+     * dosya yeniden paketlenirken yapilir (bkz. TimelapseRemuxer). Zaman
+     * damgasini burada sikistirmak dosya suresini bozup sonunda donmus kare
+     * birakiyordu. Onizleme her zaman gercek zamanlidir.
      */
     @Volatile
-    private var timeScale = 1f
-    private var videoBaseTimestamp = -1L
+    private var frameSkip = 1
     private var videoFrameIndex = 0L
 
-    fun beginTimelapse(scale: Float) {
+    fun beginTimelapse(skip: Int) {
         handler.post {
-            timeScale = scale.coerceAtLeast(1f)
-            videoBaseTimestamp = -1L
+            frameSkip = skip.coerceAtLeast(1)
             videoFrameIndex = 0L
         }
     }
 
     fun endTimelapse() {
-        handler.post { timeScale = 1f }
+        handler.post { frameSkip = 1 }
     }
 
     private val thread = HandlerThread("SoftZoomGL").apply { start() }
@@ -214,17 +214,9 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
             currentCy = frameOut[2]
         }
         currentZoom = currentZoom.coerceAtLeast(1f)
-        val videoOutput = if (timeScale > 1f) resolveVideoOutput() else null
+        val videoOutput = if (frameSkip > 1) resolveVideoOutput() else null
         outputs.forEach { (output, eglSurface) ->
-            val isVideo = output === videoOutput
-            var presentationTime = timestamp
-            if (isVideo && timeScale > 1f) {
-                val skip = timeScale.toInt().coerceAtLeast(1)
-                if (videoFrameIndex++ % skip != 0L) return@forEach
-                if (videoBaseTimestamp < 0L) videoBaseTimestamp = timestamp
-                presentationTime = videoBaseTimestamp +
-                    ((timestamp - videoBaseTimestamp) / timeScale).toLong()
-            }
+            if (output === videoOutput && videoFrameIndex++ % frameSkip != 0L) return@forEach
             if (!makeCurrent(eglSurface)) return@forEach
             output.updateTransformMatrix(finalMatrix, stMatrix)
 
@@ -248,7 +240,7 @@ class ZoomSurfaceProcessor : SurfaceProcessor {
             GLES20.glDisableVertexAttribArray(aPosition)
             GLES20.glDisableVertexAttribArray(aTexCoord)
 
-            EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, presentationTime)
+            EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, timestamp)
             EGL14.eglSwapBuffers(eglDisplay, eglSurface)
         }
     }

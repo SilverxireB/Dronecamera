@@ -113,6 +113,8 @@
     <string name="dronie_guide">Telefonu yüzüne yakın tut, çekim uzaklaşarak açılır</string>
 
     <!-- Mesajlar -->
+    <string name="timelapse_processing">Timelapse hızlandırılıyor…</string>
+    <string name="timelapse_failed">Timelapse hızlandırılamadı, ham kayıt silindi</string>
     <string name="video_saved">Video kaydedildi: Filmler/DroneCamera</string>
     <string name="record_error">Kayıt hatası: %d</string>
     <string name="camera_error">Kamera açılamadı: %s</string>

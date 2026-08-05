@@ -33,6 +33,11 @@ BOOMERANG/STEP/TIMELAPSE/TWO_POINT/VERTIGO/DRONIE) + `usesFrontCamera/
 allowsLensRange/usesDirection/usesCurve/directionIsHorizontal`, `FramePoint`
 (İKİ NOKTA kadrajı: zoom + merkez).
 
+### TimelapseRemuxer.kt (~110 satır)
+Timelapse'i YENİDEN KODLAMADAN hızlandırır: MediaExtractor→MediaMuxer ile
+örnekler aynen kopyalanıp zaman damgaları hız çarpanına bölünür. Çekimde
+kareler zaten seyreltiliyor; hızlandırma burada yapılır. Kalite kaybı yok.
+
 ### ProgressRing.kt (~60 satır)
 Deklanşörün çevresindeki ilerleme halkası (`progress` 0..1).
 

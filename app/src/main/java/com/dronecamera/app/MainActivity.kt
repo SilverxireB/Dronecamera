@@ -45,6 +45,7 @@ import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
@@ -57,6 +58,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.Observer
 import com.dronecamera.app.databinding.ActivityMainBinding
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.max
@@ -131,6 +133,9 @@ class MainActivity : AppCompatActivity() {
     private var rowExposure: LinearLayout? = null
 
     private var lastVideoUri: Uri? = null
+    /** Timelapse ham kaydi; hizlandirma icin yeniden paketlenip silinir. */
+    private var timelapseTemp: File? = null
+    private var isProcessing = false
     private var isShotRunning = false
     private var isRehearsing = false
     private var isCountingDown = false
@@ -160,6 +165,8 @@ class MainActivity : AppCompatActivity() {
 
         prefs = getSharedPreferences("drone_camera", Context.MODE_PRIVATE)
         loadPrefs()
+        // Onceki oturumdan yarim kalmis timelapse ham kaydi varsa yer kaplamasin.
+        runCatching { File(cacheDir, TIMELAPSE_TEMP_NAME).delete() }
 
         buildModeCarousel()
         buildLensSegments()
@@ -293,7 +300,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    private fun isBusy() = isShotRunning || isCountingDown || isRehearsing
+    private fun isBusy() = isShotRunning || isCountingDown || isRehearsing || isProcessing
 
     private fun haptic(view: View) =
         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -1789,19 +1796,35 @@ class MainActivity : AppCompatActivity() {
     private fun startRecording(sequence: List<ZoomSegment>) {
         val videoCapture = this.videoCapture ?: return
 
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, timestampName("DRONE_"))
-            put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DroneCamera")
+        // Timelapse once gecici dosyaya cekilir; bitince yeniden paketlenerek
+        // hizlandirilir ve galeriye oyle yazilir.
+        val useTempFile = mode == CameraMode.TIMELAPSE &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+        val pendingRecording = if (useTempFile) {
+            val temp = File(cacheDir, TIMELAPSE_TEMP_NAME)
+            temp.delete()
+            timelapseTemp = temp
+            videoCapture.output.prepareRecording(
+                this, FileOutputOptions.Builder(temp).build()
+            )
+        } else {
+            timelapseTemp = null
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, timestampName("DRONE_"))
+                put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DroneCamera")
+                }
             }
+            videoCapture.output.prepareRecording(
+                this,
+                MediaStoreOutputOptions.Builder(
+                    contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                ).setContentValues(values).build()
+            )
         }
-        val outputOptions = MediaStoreOutputOptions.Builder(
-            contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        ).setContentValues(values).build()
 
-        val pending = videoCapture.output
-            .prepareRecording(this, outputOptions)
+        val pending = pendingRecording
             .apply {
                 // Timelapse'te zaman sikistirildigi icin ses anlamsiz kalir.
                 val wantsAudio = !muteAudio && mode != CameraMode.TIMELAPSE
@@ -1814,7 +1837,7 @@ class MainActivity : AppCompatActivity() {
                     isShotRunning = true
                     setRecordingUi(true)
                     if (mode == CameraMode.TIMELAPSE) {
-                        zoomProcessor?.beginTimelapse(timelapseSpeed.toFloat())
+                        zoomProcessor?.beginTimelapse(timelapseSpeed)
                     }
                     startZoomSequence(sequence)
                 }
@@ -1832,9 +1855,14 @@ class MainActivity : AppCompatActivity() {
                             this, getString(R.string.record_error, event.error), Toast.LENGTH_LONG
                         ).show()
                     } else {
-                        lastVideoUri = event.outputResults.outputUri
-                        updateGalleryThumb()
-                        Toast.makeText(this, R.string.video_saved, Toast.LENGTH_LONG).show()
+                        val temp = timelapseTemp
+                        if (temp != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            finishTimelapse(temp)
+                        } else {
+                            lastVideoUri = event.outputResults.outputUri
+                            updateGalleryThumb()
+                            Toast.makeText(this, R.string.video_saved, Toast.LENGTH_LONG).show()
+                        }
                     }
                 }
             }
@@ -1874,6 +1902,64 @@ class MainActivity : AppCompatActivity() {
             },
             onEnd = { stopShot() }
         ).also { it.start() }
+    }
+
+    /**
+     * Timelapse ham kaydini hizlandirarak galeriye yazar. Yeniden kodlama
+     * yapilmaz; yalnizca zaman damgalari olceklenir, bu yuzden islem kisadir
+     * ve goruntu kalitesi birebir korunur.
+     */
+    private fun finishTimelapse(temp: File) {
+        timelapseTemp = null
+        val speed = timelapseSpeed
+        isProcessing = true
+        Toast.makeText(this, R.string.timelapse_processing, Toast.LENGTH_SHORT).show()
+
+        Thread {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, timestampName("TIMELAPSE_"))
+                put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DroneCamera")
+                put(MediaStore.Video.Media.IS_PENDING, 1)
+            }
+            val uri = runCatching {
+                contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+            }.getOrNull()
+
+            var success = false
+            if (uri != null) {
+                success = runCatching {
+                    contentResolver.openFileDescriptor(uri, "w")?.use { descriptor ->
+                        TimelapseRemuxer.remux(temp, descriptor.fileDescriptor, speed)
+                    } ?: false
+                }.getOrDefault(false)
+
+                if (success) {
+                    runCatching {
+                        contentResolver.update(
+                            uri,
+                            ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) },
+                            null,
+                            null
+                        )
+                    }
+                } else {
+                    runCatching { contentResolver.delete(uri, null, null) }
+                }
+            }
+            temp.delete()
+
+            runOnUiThread {
+                isProcessing = false
+                if (success && uri != null) {
+                    lastVideoUri = uri
+                    updateGalleryThumb()
+                    Toast.makeText(this, R.string.video_saved, Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this, R.string.timelapse_failed, Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
     }
 
     private fun stopShot() {
@@ -1920,5 +2006,8 @@ class MainActivity : AppCompatActivity() {
 
         /** Prova rampasinin suresi. */
         const val REHEARSAL_MS = 2000L
+
+        /** Timelapse ham kaydinin gecici dosya adi. */
+        const val TIMELAPSE_TEMP_NAME = "timelapse_raw.mp4"
     }
 }
