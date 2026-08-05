@@ -24,7 +24,7 @@ Bölge başlıklarıyla gezin (`// ---- ...` yorum satırları):
   `buildPointButtons()` (sahne tuşları: dokun-aç, tekrar dokun-kaydet),
   `canMoveCenter()`, `screenToBuffer()/pushCenter()` (KOORDİNAT TUZAĞI),
   `toggleSettings()`, `applyModeToUi()`, `sizeSettingsSheet()`
-  (yatayda panel yüksekliğini ekrana uydurur), `runRehearsal()` (PROVA: kayıtsız
+  (yatayda panel yüksekliğini ekrana uydurur), `runRehearsal()` (ÖNİZLE: kayıtsız
   hızlı rampa önizlemesi), `updateGalleryThumb()/openLastVideo()`
 - `Kamera`: `startCamera()`, `bindCamera()` (sabitleme için 3 kademeli fallback:
   önizleme→video→kapalı), `chooseCameraSelector()`, `observeZoom()`,
@@ -76,9 +76,11 @@ kalır. `SoftZoomEffect` = CameraEffect sarmalayıcısı.
   settingsScrim, settingsSheet (başlık + ScrollView 360dp > `settingsContent`)
 - `values/strings.xml`: tüm TR metinler; `values/colors.xml`: textPrimary/Secondary/
   Tertiary/OnChip, accentIce, gridLine; `values/themes.xml`: Theme.AppCompat.NoActionBar
+- `mipmap-<yogunluk>/`: ic_launcher / ic_launcher_round / ic_launcher_foreground
+  (PROVA logosu, PNG); `mipmap-anydpi-v26/`: uyarlanabilir simge XML'leri
 - `drawable/`: glass_panel, sheet_bg, sheet_handle, bottom_scrim, chip_bg,
   chip_bg_selected, progress_line, mode_dot, shutter_idle/rec, rec_dot,
-  ic_settings/ic_close/ic_flip, ic_launcher_foreground
+  ic_settings/ic_close/ic_flip, target_rect, target_rect_alt, focus_ring
 
 ## Yapılandırma
 

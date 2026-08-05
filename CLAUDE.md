@@ -1,4 +1,4 @@
-# Drone Kamera — Proje Notları
+# Prova (Drone Kamera) — Proje Notları
 
 Android kamera uygulaması (Kotlin + CameraX). Telefon zoom'uyla drone benzeri
 video çekimleri yapar. Kullanıcı dili: Türkçe. Cihaz: Honor Magic 8 Pro
@@ -41,6 +41,11 @@ video çekimleri yapar. Kullanıcı dili: Türkçe. Cihaz: Honor Magic 8 Pro
   olarak çizilir (`openPicker/placeRect`). Modlar arası iş bölümü: DRONE =
   hep merkez, AÇILIŞ = tek nokta (HEDEF tuşu), İKİ NOKTA = iki sahne
   (1./2. SAHNE tuşları), TIMELAPSE = dokunma yok.
+- Uygulama adı PROVA (`app_name`), simge `mipmap-*/ic_launcher*.png` +
+  `mipmap-anydpi-v26` uyarlanabilir simge (ön plan PNG, zemin `icon_bg`).
+  Simgeler kullanıcının verdiği 1024px görselden Pillow ile üretildi; rozet
+  (162,145)-(859,842) kırpması. Paket adı DEĞİŞMEDİ — güncellemeler üstüne kurulsun.
+  Prova tuşunun adı bu yüzden ÖNİZLE oldu (uygulama adıyla çakışmasın).
 - UI TUZAĞI: dikey LinearLayout'a eklenen View varsayılan MATCH_PARENT genişlik alır;
   HorizontalScrollView içinde bu genişlik 0'a çöker ve yazı tek harfe kırpılır.
   Kodla üretilen her etikete AÇIKÇA WRAP_CONTENT layoutParams ver.

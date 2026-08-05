@@ -1,4 +1,4 @@
-# Drone Kamera 🚁📷
+# Prova 🚁📷
 
 Telefonun zoom özelliğini kullanarak **drone benzeri çekimler** yapan Android kamera uygulaması.
 

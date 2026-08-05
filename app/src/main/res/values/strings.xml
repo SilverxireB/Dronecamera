@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Drone Kamera</string>
+    <string name="app_name">Prova</string>
 
     <!-- Modlar -->
     <string name="mode_drone">DRONE</string>
@@ -55,8 +55,8 @@
     <string name="preset_empty">Şablon %d boş — kaydetmek için basılı tut</string>
     <string name="opt_mute_title">Sessiz çekim</string>
     <string name="opt_mute_summary">Ses kaydedilmez (rüzgâr gürültüsü olmaz)</string>
-    <string name="rehearse">PROVA</string>
-    <string name="rehearse_running">Prova…</string>
+    <string name="rehearse">ÖNİZLE</string>
+    <string name="rehearse_running">Önizleme…</string>
     <string name="desc_gallery">Son çekim</string>
     <string name="no_video_app">Videoyu açacak uygulama bulunamadı</string>
     <string name="label_threshold">LENS EŞİĞİ</string>
