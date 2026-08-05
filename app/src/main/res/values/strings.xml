@@ -45,7 +45,6 @@
     <string name="exposure_fmt">%+.1f EV</string>
     <string name="exposure_unsupported">Bu kamerada pozlama ayarı yok</string>
     <string name="remaining_fmt">%.1f sn</string>
-    <string name="center_hint">Dokun: kadraj merkezi · Çift dokun: ortala</string>
     <string name="center_needs_zoom">Kadraj merkezi için kırpma payı gerekli — Yazılım Zoom açık olmalı</string>
     <string name="exposure_reset">Sıfırla</string>
     <string name="label_preset">ŞABLON</string>
@@ -57,8 +56,6 @@
     <string name="opt_mute_title">Sessiz çekim</string>
     <string name="opt_mute_summary">Ses kaydedilmez (rüzgâr gürültüsü olmaz)</string>
     <string name="rehearse">PROVA</string>
-    <string name="target_pick">HEDEF</string>
-    <string name="target_done">BİTİR</string>
     <string name="rehearse_running">Prova…</string>
     <string name="desc_gallery">Son çekim</string>
     <string name="no_video_app">Videoyu açacak uygulama bulunamadı</string>
@@ -100,14 +97,14 @@
     <string name="point_saved">%s kadrajı kaydedildi</string>
     <string name="point_missing">Önce 1. ve 2. sahne kadrajlarını kur</string>
     <string name="pick_guide">%s · çerçeveyi dokunarak taşı, iki parmakla büyüt-küçült · bitince tuşa yeniden dokun</string>
-    <string name="pick_start">BAŞLANGIÇ</string>
+    <string name="pick_start">BAŞLANGIÇ KARESİ</string>
 
     <!-- Ozet -->
     <string name="summary_sep"> · </string>
 
     <!-- Rehberler -->
     <string name="vertigo_guide">Kayıt boyunca özneye doğru sabit hızda yürü</string>
-    <string name="reveal_guide">AÇILIŞ: çekim seçtiğin noktadan başlar, geniş açıya açılır · noktayı HEDEF ile seç</string>
+    <string name="reveal_guide">AÇILIŞ: çekim seçtiğin kareden başlar, geniş açıya açılır · kareyi BAŞLANGIÇ KARESİ tuşuyla seç</string>
     <string name="two_point_guide">İKİ NOKTA: çekim 1. sahne kadrajından başlar, 2. sahne kadrajında biter · tuşlara dokunup kadrajları kur</string>
     <string name="dronie_guide">Telefonu yüzüne yakın tut, çekim uzaklaşarak açılır</string>
 

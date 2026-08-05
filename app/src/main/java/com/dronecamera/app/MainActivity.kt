@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.hardware.camera2.CameraCharacteristics
@@ -61,6 +62,7 @@ import com.dronecamera.app.databinding.ActivityMainBinding
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -249,10 +251,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadPoint(key: String): FramePoint? {
         if (!prefs.getBoolean("pt${key}_set", false)) return null
+        // Referans tabani olmayan eski kayitlar kullanilamaz (merkez hangi
+        // kadrajda olculdugu bilinmeden olceklenemez); kadraj yeniden kurulur.
+        val basis = prefs.getFloat("pt${key}_b", 0f)
+        if (basis <= 0f) return null
         return FramePoint(
             prefs.getFloat("pt${key}_z", 1f),
             prefs.getFloat("pt${key}_x", ZoomSegment.CENTER),
-            prefs.getFloat("pt${key}_y", ZoomSegment.CENTER)
+            prefs.getFloat("pt${key}_y", ZoomSegment.CENTER),
+            basis
         )
     }
 
@@ -265,6 +272,7 @@ class MainActivity : AppCompatActivity() {
                 .putFloat("pt${key}_z", point.zoom)
                 .putFloat("pt${key}_x", point.cx)
                 .putFloat("pt${key}_y", point.cy)
+                .putFloat("pt${key}_b", point.basis)
         }
         editor.apply()
     }
@@ -439,7 +447,7 @@ class MainActivity : AppCompatActivity() {
     // ---------------------------------------------------------------- Menu kurulumu
 
     private fun buildModeCarousel() {
-        val items = CameraMode.values().map { m ->
+        val items = CameraMode.DISPLAY_ORDER.map { m ->
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = android.view.Gravity.CENTER_HORIZONTAL
@@ -468,10 +476,9 @@ class MainActivity : AppCompatActivity() {
             item.addView(label)
             item.addView(dot)
             item.setOnClickListener {
-                if (isBusy() || mode == m) return@setOnClickListener
+                if (isLocked() || mode == m) return@setOnClickListener
                 haptic(item)
                 mode = m
-                if (isPicking) closePicker(save = false)
                 savePrefs()
                 applyModeToUi()
                 refreshAll()
@@ -511,7 +518,7 @@ class MainActivity : AppCompatActivity() {
             val chip = makeChip(getString(range.labelRes))
             chip.maxLines = 1
             chip.setOnClickListener {
-                if (isBusy()) return@setOnClickListener
+                if (isLocked()) return@setOnClickListener
                 haptic(chip)
                 lensRange = range
                 savePrefs()
@@ -571,11 +578,53 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Cekim boyunca optik zoom'un tutulacagi sabit deger. Kaydirma modunda
-     * zoom sabittir; digerlerinde rampanin en dusuk ucudur.
+     * Cekim boyunca optik zoom'un tutulacagi sabit deger; rampanin tamami bu
+     * kadrajin icinden kirpilarak yapilir. Normalde rampanin en dusuk ucudur.
      */
     private fun opticalBasisFor(range: Pair<Float, Float>): Float {
+        if (mode == CameraMode.TWO_POINT) {
+            val a = pointA
+            val b = pointB
+            if (a != null && b != null) return twoPointBasis(a, b)
+        }
         return min(min(range.first, range.second), currentOpticalCeiling())
+    }
+
+    /**
+     * IKI NOKTA'nin motoru: iki kadrajin da ULASILABILIR kaldigi en dar (yani
+     * en kaliteli) optik taban.
+     *
+     * Kirpma penceresi kareden disari cikamaz; bir kadraja ancak optik taban
+     * onu icine alacak kadar genisse varilabilir. Iki kadraj 20x-20x de olsa,
+     * 3x-7x de olsa kural ayni: taban, ikisinin de kenarlarini iceren en buyuk
+     * degerdir. Sahne 2'nin "varamamasinin" sebebi buydu — taban iki zoom'un
+     * kucugu aliniyordu ve o kadar dar bir alanda ikinci nokta yoktu.
+     */
+    private fun twoPointBasis(a: FramePoint, b: FramePoint): Float {
+        var limit = Float.MAX_VALUE
+        listOf(a, b).forEach { point ->
+            if (point.basis <= 0f || point.zoom <= 0f) return@forEach
+            listOf(point.cx, point.cy).forEach { coordinate ->
+                // Taban * ( |merkez sapmasi| / referans + 1 / (2*zoom) ) <= 0.5
+                val need = abs(coordinate - ZoomSegment.CENTER) / point.basis +
+                    1f / (2f * point.zoom)
+                if (need > 0f) limit = min(limit, 0.5f / need)
+            }
+        }
+        val deviceMin = camera?.cameraInfo?.zoomState?.value?.minZoomRatio ?: 1f
+        // Kirpma tavani (MAX_SOFT_CROP) tabani asagidan sinirlar.
+        val floor = max(deviceMin, max(a.zoom, b.zoom) / MAX_SOFT_CROP)
+        val ceiling = min(min(a.zoom, b.zoom), currentOpticalCeiling())
+        return limit.coerceIn(min(floor, ceiling), ceiling)
+    }
+
+    /**
+     * Bir merkez koordinatini `from` optik tabaninda olculmus halinden `to`
+     * tabanina cevirir. Taban buyudukce gorus alani daralir, sapmalar buyur.
+     */
+    private fun rebaseCoord(value: Float, from: Float, to: Float): Float {
+        if (from <= 0f || to <= 0f) return value
+        return ZoomSegment.CENTER + (value - ZoomSegment.CENTER) * (to / from)
     }
 
     private fun currentOpticalCeiling(): Float {
@@ -608,13 +657,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * IKI NOKTA modunun sahne tuslari. Tek dokunus o sahnenin kadraj secme
-     * ekranini acar, ikinci dokunus kaydedip kapatir — basili tutma gibi
-     * gorunmez bir jest yok, ne yapildigi tusun ustunde yazar.
+     * Kadraj tuslari: ACILIS'ta tek "BASLANGIC KARESI", IKI NOKTA'da iki sahne.
+     * Tek dokunus secme ekranini acar, ikinci dokunus kaydedip kapatir —
+     * basili tutma gibi gorunmez bir jest yok, ne yapildigi tusun ustunde yazar.
      */
     private fun buildPointButtons() {
-        val slots = listOf(PickSlot.SCENE_A, PickSlot.SCENE_B)
-        val chips = slots.map { slot ->
+        val chips = PickSlot.values().map { slot ->
             val chip = makeChip(getString(slot.labelRes))
             chip.setOnClickListener {
                 if (isBusy()) return@setOnClickListener
@@ -627,10 +675,23 @@ class MainActivity : AppCompatActivity() {
         refreshers += {
             chips.forEach { (slot, chip) ->
                 val label = getString(slot.labelRes)
-                val point = if (slot == PickSlot.SCENE_A) pointA else pointB
+                val visible = when (slot) {
+                    PickSlot.START -> mode == CameraMode.REVEAL
+                    else -> mode == CameraMode.TWO_POINT
+                }
+                setVisible(chip, visible)
+                val point = when (slot) {
+                    PickSlot.SCENE_A -> pointA
+                    PickSlot.SCENE_B -> pointB
+                    PickSlot.START -> null
+                }
                 chip.text = when {
                     pickSlot == slot -> getString(R.string.point_editing, label)
-                    point == null -> getString(R.string.point_slot_empty, label)
+                    point == null -> if (slot == PickSlot.START) {
+                        label
+                    } else {
+                        getString(R.string.point_slot_empty, label)
+                    }
                     else -> getString(R.string.point_slot_set, label, fmtZoom(point.zoom))
                 }
                 styleChip(chip, pickSlot == slot || point != null)
@@ -927,10 +988,6 @@ class MainActivity : AppCompatActivity() {
         binding.settingsScrim.setOnClickListener { toggleSettings(false) }
         binding.progressRing.ringWidth = dp(4).toFloat()
         binding.progressRing.ringColor = ContextCompat.getColor(this, R.color.accentIce)
-        binding.btnTarget.setOnClickListener {
-            haptic(it)
-            if (isPicking) closePicker(save = true) else openPicker(PickSlot.START)
-        }
         binding.btnRehearse.setOnClickListener {
             haptic(it)
             runRehearsal()
@@ -1000,7 +1057,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleSettings(open: Boolean) {
-        if (isBusy() && open) return
+        if (isLocked() && open) return
         settingsOpen = open
         setVisible(binding.settingsSheet, open)
         setVisible(binding.settingsScrim, open)
@@ -1068,11 +1125,29 @@ class MainActivity : AppCompatActivity() {
         zoomProcessor?.zoom = 1f
         zoomProcessor?.setCenter(ZoomSegment.CENTER, ZoomSegment.CENTER)
         updateZoomBadge(pickZoom)
-        binding.btnTarget.text = getString(R.string.target_done)
+        setPickingUi(true)
         refreshAll()
         applyModeToUi()
         updateTargetRect()
     }
+
+    /**
+     * Secme ekrani acikken ekranin geri kalani kilitlenir: yalnizca kadraj
+     * secilir. Mod/lens seridi, ayarlar ve prova hem soluklasir hem de
+     * dokunusa kapanir; deklansor sadece secimi bitirir.
+     */
+    private fun setPickingUi(active: Boolean) {
+        val alpha = if (active) 0.3f else 1f
+        listOf(
+            binding.modeScroll, binding.lensScroll, binding.btnSettings,
+            binding.btnRehearse, binding.btnGallery
+        ).forEach { it.alpha = alpha }
+        // Dokunuslar `isLocked()` ile kaynaginda engellenir; ViewGroup'a
+        // isEnabled vermek cocuk tiklamalarini durdurmuyor.
+    }
+
+    /** Cekim/isleme sirasinda VE kadraj secerken diger kontroller kapalidir. */
+    private fun isLocked() = isBusy() || isPicking
 
     /** Secme ekranini kapatir; `save` ise duzenlenen kadraji saklar. */
     private fun closePicker(save: Boolean) {
@@ -1080,9 +1155,10 @@ class MainActivity : AppCompatActivity() {
         pickSlot = null
         setVisible(binding.targetRect, false)
         setVisible(binding.targetRectAlt, false)
-        binding.btnTarget.text = getString(R.string.target_pick)
+        setPickingUi(false)
         if (save && slot != PickSlot.START) {
-            val point = FramePoint(pickZoom, centerScreenX, centerScreenY)
+            // Merkez, secme ekraninin genis kadrajinda olculdu: tabani da sakla.
+            val point = FramePoint(pickZoom, centerScreenX, centerScreenY, pickerBasis())
             if (slot == PickSlot.SCENE_A) pointA = point else pointB = point
             savePrefs()
             Toast.makeText(
@@ -1138,7 +1214,14 @@ class MainActivity : AppCompatActivity() {
         if (other == null) {
             setVisible(binding.targetRectAlt, false)
         } else {
-            placeRect(binding.targetRectAlt, other.zoom / basis, other.cx, other.cy, width, height)
+            placeRect(
+                binding.targetRectAlt,
+                other.zoom / basis,
+                rebaseCoord(other.cx, other.basis, basis),
+                rebaseCoord(other.cy, other.basis, basis),
+                width,
+                height
+            )
         }
     }
 
@@ -1174,11 +1257,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Onizlemeye dokunmak kadraj merkezini tasiyabilir mi? Secme ekraninda her
-     * zaman evet. Disarida yalnizca ACILIS modunda; IKI NOKTA'da kadrajlar
-     * sahne tuslariyla kurulur, serbest dokunus orada kafa karistiriyordu.
+     * Onizlemeye dokunmak kadraj merkezini tasiyabilir mi? YALNIZCA secme
+     * ekraninda. Disarida serbest dokunus, yuksek zoomda gorunmeyen bir yeri
+     * secmeye calismak demekti; kadraj artik hep cerceveyle kurulur.
      */
-    private fun canMoveCenter(): Boolean = isPicking || mode == CameraMode.REVEAL
+    private fun canMoveCenter(): Boolean = isPicking
 
     /**
      * Kirpma penceresinin merkezini dokunulan noktaya tasir ve ayni noktaya
@@ -1306,13 +1389,54 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Galeri uygulamasini acar; acilamazsa son videoyu oynatmaya duser. */
+    /**
+     * Galeriyi acar. CATEGORY_APP_GALLERY cogu cihazda Google Fotograflar'a
+     * dusuyor; once CIHAZIN KENDI galerisi denenir (once bilinen paketler,
+     * sonra videoyu acabilen sistem uygulamalari), Google Fotograflar en son
+     * caredir.
+     */
     private fun openGallery() {
+        if (isPicking) return
+        val target = builtInGalleryPackage()
+        if (target != null && launchGallery(target)) return
+        if (playLastVideo()) return
         val gallery = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_GALLERY)
         if (runCatching { startActivity(gallery) }.isSuccess) return
-        if (!playLastVideo()) {
-            Toast.makeText(this, R.string.no_video_app, Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, R.string.no_video_app, Toast.LENGTH_SHORT).show()
+    }
+
+    /** Son videoyu verilen pakette acar, o yoksa paketin kendisini baslatir. */
+    private fun launchGallery(pkg: String): Boolean {
+        val uri = lastVideoUri
+        if (uri != null) {
+            val view = Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "video/mp4")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                .setPackage(pkg)
+            if (runCatching { startActivity(view) }.isSuccess) return true
         }
+        val launch = packageManager.getLaunchIntentForPackage(pkg) ?: return false
+        return runCatching { startActivity(launch) }.isSuccess
+    }
+
+    /**
+     * Cihazin yerlesik galerisi. Once bilinen ureticiler (bu cihazda Honor),
+     * sonra videoyu acabilen sistem uygulamalarindan Google olmayan ilki.
+     */
+    private fun builtInGalleryPackage(): String? {
+        val installed = packageManager.getInstalledApplications(0).associateBy { it.packageName }
+        KNOWN_GALLERY_PACKAGES.firstOrNull { installed.containsKey(it) }?.let { return it }
+
+        val probe = Intent(Intent.ACTION_VIEW).setDataAndType(
+            lastVideoUri ?: MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "video/mp4"
+        )
+        return packageManager.queryIntentActivities(probe, 0)
+            .map { it.activityInfo.packageName }
+            .firstOrNull { name ->
+                if (name.startsWith("com.google.")) return@firstOrNull false
+                val info = installed[name] ?: return@firstOrNull false
+                (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            }
     }
 
     /** Son cekilen videoyu dogrudan oynatir (kucuk resme basili tutunca). */
@@ -1348,7 +1472,7 @@ class MainActivity : AppCompatActivity() {
      * nereye acilacagini onceden gormeyi saglar, sonra baslangic kadrajina doner.
      */
     private fun runRehearsal() {
-        if (isBusy()) return
+        if (isLocked()) return
         val range = resolveZoomRange() ?: return
         rampOpticalBasis = opticalBasisFor(range)
         applyEffectiveZoom(range.first)
@@ -1391,11 +1515,9 @@ class MainActivity : AppCompatActivity() {
             },
             onEnd = {
                 isRehearsing = false
-                zoomProcessor?.frameProvider = null
                 sequencePlayer = null
-                binding.progressRing.progress = 0f
                 binding.btnRehearse.text = getString(R.string.rehearse)
-                applyStartZoom()
+                resetToStartFrame()
             }
         ).also { it.start() }
     }
@@ -1403,9 +1525,7 @@ class MainActivity : AppCompatActivity() {
     /** Moda gore hangi kontrollerin gorunecegini ayarlar. */
     private fun applyModeToUi() {
         setVisible(binding.lensScroll, mode.allowsLensRange)
-        setVisible(binding.pointRow, mode == CameraMode.TWO_POINT)
-        // HEDEF tusu yalnizca ACILIS icin; IKI NOKTA'da secim sahne tuslarindan.
-        setVisible(binding.btnTarget, mode.usesCenter && mode != CameraMode.TWO_POINT)
+        setVisible(binding.pointRow, mode.usesCenter)
         if (!mode.usesCenter && isPicking) closePicker(save = false)
         binding.gridGroup.visibility = gridVisibility()
 
@@ -1680,8 +1800,8 @@ class MainActivity : AppCompatActivity() {
         // gosterir: merkez de o sahneden alinir.
         if (mode == CameraMode.TWO_POINT) {
             pointA?.let {
-                centerScreenX = it.cx
-                centerScreenY = it.cy
+                centerScreenX = rebaseCoord(it.cx, it.basis, rampOpticalBasis)
+                centerScreenY = rebaseCoord(it.cy, it.basis, rampOpticalBasis)
             }
         }
         applyEffectiveZoom(range.first)
@@ -1827,9 +1947,16 @@ class MainActivity : AppCompatActivity() {
                 if (a == null || b == null) {
                     emptyList()
                 } else {
-                    // Kayitli kadrajlar ekran uzayindadir; doku uzayina cevrilir.
-                    val (ax, ay) = screenToBuffer(a.cx, a.cy)
-                    val (bx, by) = screenToBuffer(b.cx, b.cy)
+                    // Kayitli kadrajlar SECME ekraninin genis alaninda ve ekran
+                    // uzayindadir; once cekimin optik tabanina olceklenir,
+                    // sonra doku uzayina cevrilir.
+                    val basis = rampOpticalBasis
+                    val (ax, ay) = screenToBuffer(
+                        rebaseCoord(a.cx, a.basis, basis), rebaseCoord(a.cy, a.basis, basis)
+                    )
+                    val (bx, by) = screenToBuffer(
+                        rebaseCoord(b.cx, b.basis, basis), rebaseCoord(b.cy, b.basis, basis)
+                    )
                     listOf(
                         ZoomSegment.Hold(a.zoom, 600, ax, ay),
                         ZoomSegment.Ramp(
@@ -1898,8 +2025,12 @@ class MainActivity : AppCompatActivity() {
         }
         if (settingsOpen) toggleSettings(false)
 
-        // Secme ekrani acikken deklansore basmak kadraji kaydedip cekime gecer.
-        if (isPicking) closePicker(save = true)
+        // Secme ekrani acikken deklansor yalnizca secimi bitirir: o sirada
+        // ekranin tek isi kadraj secmektir.
+        if (isPicking) {
+            closePicker(save = true)
+            return
+        }
 
         if (mode == CameraMode.TWO_POINT && (pointA == null || pointB == null)) {
             Toast.makeText(this, R.string.point_missing, Toast.LENGTH_LONG).show()
@@ -2009,6 +2140,9 @@ class MainActivity : AppCompatActivity() {
                     isShotRunning = false
                     applyCaptureOptions(locked = false)
                     setRecordingUi(false)
+                    // Cekim son karede donup kalmasin: goruntu, kirpma ve rozet
+                    // birlikte baslangic kadrajina doner.
+                    resetToStartFrame()
                     if (event.hasError()) {
                         Toast.makeText(
                             this, getString(R.string.record_error, event.error), Toast.LENGTH_LONG
@@ -2123,6 +2257,7 @@ class MainActivity : AppCompatActivity() {
 
             runOnUiThread {
                 isProcessing = false
+                resetToStartFrame()
                 if (success && uri != null) {
                     lastVideoUri = uri
                     updateGalleryThumb()
@@ -2141,6 +2276,17 @@ class MainActivity : AppCompatActivity() {
         sequencePlayer = null
         activeRecording?.stop()
         activeRecording = null
+    }
+
+    /**
+     * Her cekim/prova sonrasi onizlemeyi baslangic kadrajina dondurur.
+     * Kare saglayici birakildiginda kirpma son degerinde takili kaliyor, rozet
+     * de oyle: goruntu ile menu birbirini tutmuyordu. Tek kapi burasi.
+     */
+    private fun resetToStartFrame() {
+        zoomProcessor?.frameProvider = null
+        binding.progressRing.progress = 0f
+        binding.previewView.post { if (!isBusy()) applyStartZoom() }
     }
 
     private fun setRecordingUi(recording: Boolean) {
@@ -2178,6 +2324,21 @@ class MainActivity : AppCompatActivity() {
 
         /** Prova rampasinin suresi. */
         const val REHEARSAL_MS = 2000L
+
+        /**
+         * Bilinen yerlesik galeri paketleri. Google Fotograflar bilincli
+         * olarak yok: kullanici cihazin kendi galerisini istiyor.
+         */
+        val KNOWN_GALLERY_PACKAGES = listOf(
+            "com.hihonor.photos",
+            "com.huawei.photos",
+            "com.android.gallery3d",
+            "com.sec.android.gallery3d",
+            "com.miui.gallery",
+            "com.oplus.gallery",
+            "com.coloros.gallery3d",
+            "com.oneplus.gallery"
+        )
 
         /** Timelapse ham kaydinin gecici dosya adi. */
         const val TIMELAPSE_TEMP_NAME = "timelapse_raw.mp4"

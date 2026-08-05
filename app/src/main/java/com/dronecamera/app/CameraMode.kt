@@ -78,10 +78,27 @@ enum class CameraMode(val labelRes: Int) {
     /** Hiz egrisi secilebilir mi (timelapse her zaman dogrusaldir)? */
     val usesCurve: Boolean
         get() = this != TIMELAPSE
+
+    companion object {
+        /**
+         * Serit sirasi: gunluk kullanilan dort mod basta, denemelik olanlar
+         * arkada kalir. Enum sirasi degil bu liste gosterilir.
+         */
+        val DISPLAY_ORDER = listOf(
+            DRONE, REVEAL, TWO_POINT, TIMELAPSE, BOOMERANG, STEP, VERTIGO, DRONIE
+        )
+    }
 }
 
-/** Kullanicinin kurdugu bir kadraj: efektif zoom + kirpma merkezi. */
-data class FramePoint(val zoom: Float, val cx: Float, val cy: Float)
+/**
+ * Kullanicinin kurdugu bir kadraj: efektif zoom + kirpma merkezi.
+ *
+ * `basis`, merkezin OLCULDUGU optik zoom degeridir (secme ekranindaki genis
+ * kadraj). Cekimde optik taban baska bir deger olabilecegi icin merkez bu
+ * referansla olceklenmek zorunda — aksi halde ikinci sahne, ilkinin
+ * goruldugu genis alanin disina dusuyor ve kadraj hic varamiyordu.
+ */
+data class FramePoint(val zoom: Float, val cx: Float, val cy: Float, val basis: Float)
 
 /**
  * Kadraj secme ekraninin hangi kadraji duzenledigi.
