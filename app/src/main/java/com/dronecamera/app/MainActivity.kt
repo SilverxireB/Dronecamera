@@ -28,7 +28,6 @@ import android.view.ScaleGestureDetector
 import android.view.Surface
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
-import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
@@ -1593,7 +1592,17 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        // Her modun kendi rehber satiri var: hangi modda oldugunu ve ne
+        // yapacagini okumadan anlamak zordu. TAM menzil uyarisi rehberin
+        // onune gecer, cunku goruntuyu bozan tek ayar odur.
+        if (mode.allowsLensRange && lensRange == LensRange.FULL) {
+            showGuide(R.string.full_range_warning)
+            return
+        }
         when (mode) {
+            CameraMode.DRONE -> showGuide(R.string.drone_guide)
+            CameraMode.BOOMERANG -> showGuide(R.string.boomerang_guide)
+            CameraMode.STEP -> showGuide(R.string.step_guide)
             CameraMode.VERTIGO -> showGuide(R.string.vertigo_guide)
             CameraMode.DRONIE -> showGuide(R.string.dronie_guide)
             CameraMode.REVEAL -> showGuide(R.string.reveal_guide)
@@ -1609,9 +1618,6 @@ class MainActivity : AppCompatActivity() {
                     getString(R.string.timelapse_guide, shootTime, durationSec)
                 binding.guideText.visibility = View.VISIBLE
             }
-            else ->
-                if (lensRange == LensRange.FULL) showGuide(R.string.full_range_warning)
-                else binding.guideText.visibility = View.GONE
         }
     }
 
@@ -1935,21 +1941,33 @@ class MainActivity : AppCompatActivity() {
             if (a != null && b != null) return a.zoom to b.zoom
         }
 
+        // Ust sinir cihazin optik tavani DEGIL, yazilim kirpmasiyla ulasilabilen
+        // efektif tavandir; aksi halde istenen zoom optige geri kirpilir ve
+        // yazilim zoom hic devreye girmez.
+        //
+        // ON KAMERADA OPTIK ZOOM YOK (azami oran 1.0): DRONIE'nin uzaklasmasi
+        // tamamen kirpmadan gelir. Bu yuzden orada kirpma payi, kullanicinin
+        // "yazilim zoom" ayarindan bagimsiz olarak acilir — aksi halde mod
+        // hicbir sey yapmiyordu.
+        val softAllowance = when {
+            !useSoftwareRamp() -> 1f
+            mode.usesFrontCamera -> max(softZoomMax, DRONIE_CROP)
+            else -> softZoomMax
+        }
+        val maxEffective = currentOpticalCeiling() * softAllowance
+
         val (rawStart, rawEnd) = when (mode) {
-            CameraMode.VERTIGO -> min(lensThreshold - 0.2f, deviceMax) to 1f
-            CameraMode.DRONIE -> min(2.5f, deviceMax) to deviceMin
+            // Dolly zoom: MENZILIN tamami tek lensin (genis) bolgesinde kalir;
+            // yazilim payi aciksa etki daha guclu olur.
+            CameraMode.VERTIGO -> {
+                val bounds = zoomBoundsFor(LensRange.MAIN, deviceMin, deviceMax)
+                bounds.second to bounds.first
+            }
+            CameraMode.DRONIE -> min(DRONIE_CROP, maxEffective) to deviceMin
             else -> {
                 val bounds = zoomBoundsFor(lensRange, deviceMin, deviceMax)
                 bounds.second to bounds.first
             }
-        }
-        // Ust sinir cihazin optik tavani DEGIL, yazilim kirpmasiyla ulasilabilen
-        // efektif tavandir; aksi halde istenen zoom optige geri kirpilir ve
-        // yazilim zoom hic devreye girmez.
-        val maxEffective = if (mode.allowsLensRange) {
-            opticalCeiling(lensRange, deviceMax) * softZoomMax
-        } else {
-            deviceMax
         }
         val start = rawStart.coerceIn(deviceMin, maxEffective)
         val end = rawEnd.coerceIn(deviceMin, maxEffective)
@@ -2026,10 +2044,12 @@ class MainActivity : AppCompatActivity() {
                 ZoomSegment.Ramp(startZoom, endZoom, total * timelapseSpeed, LinearInterpolator()),
                 ZoomSegment.Hold(endZoom, 800)
             )
+            // Dolly zoom yururken cekilir: yurumeye baslamak icin daha uzun
+            // bir hazirlik payi, sonra SABIT hiz (egri secimi bu modda kapali).
             CameraMode.VERTIGO -> listOf(
-                ZoomSegment.Hold(startZoom, 1000),
+                ZoomSegment.Hold(startZoom, 1500),
                 ZoomSegment.Ramp(startZoom, endZoom, total, LinearInterpolator()),
-                ZoomSegment.Hold(endZoom, 700)
+                ZoomSegment.Hold(endZoom, 800)
             )
             else -> emptyList()
         }
@@ -2041,7 +2061,13 @@ class MainActivity : AppCompatActivity() {
         endZoom: Float,
         totalMs: Long
     ): List<ZoomSegment> {
-        val levels = 4
+        // Kademe sayisi sureye uyar: kisa cekimde 4 kademe her birine 1 sn bile
+        // birakmiyor, uzun cekimde 4 kademe fazla tembel kaliyordu.
+        val levels = when {
+            durationSec <= 8 -> 3
+            durationSec <= 20 -> 4
+            else -> 5
+        }
         val zooms = (0 until levels).map { i ->
             (startZoom * (endZoom / startZoom).toDouble().pow(i / (levels - 1.0))).toFloat()
         }
@@ -2049,7 +2075,7 @@ class MainActivity : AppCompatActivity() {
         val holdMs = ((totalMs - rampMs * (levels - 1)) / levels).coerceAtLeast(300)
         val segments = mutableListOf<ZoomSegment>(ZoomSegment.Hold(zooms[0], holdMs))
         for (i in 1 until levels) {
-            segments += ZoomSegment.Ramp(zooms[i - 1], zooms[i], rampMs, DecelerateInterpolator())
+            segments += ZoomSegment.Ramp(zooms[i - 1], zooms[i], rampMs, curveInterpolator())
             segments += ZoomSegment.Hold(zooms[i], holdMs)
         }
         return segments
@@ -2367,6 +2393,9 @@ class MainActivity : AppCompatActivity() {
 
         /** Prova rampasinin suresi. */
         const val REHEARSAL_MS = 2000L
+
+        /** DRONIE'nin baslangic kadraji (yuz cercevesi) — efektif zoom. */
+        const val DRONIE_CROP = 2.5f
 
         /**
          * Bilinen yerlesik galeri paketleri. Google Fotograflar bilincli

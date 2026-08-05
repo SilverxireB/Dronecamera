@@ -75,9 +75,13 @@ enum class CameraMode(val labelRes: Int) {
     val usesCenter: Boolean
         get() = this == REVEAL || this == TWO_POINT
 
-    /** Hiz egrisi secilebilir mi (timelapse her zaman dogrusaldir)? */
+    /**
+     * Hiz egrisi secilebilir mi? Timelapse ve vertigo her zaman dogrusaldir
+     * (biri zamani sikistirir, oteki yuruyus hizina eslenir) — calismayacak
+     * bir ayari gostermiyoruz.
+     */
     val usesCurve: Boolean
-        get() = this != TIMELAPSE
+        get() = this != TIMELAPSE && this != VERTIGO
 
     companion object {
         /**

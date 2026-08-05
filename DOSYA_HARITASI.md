@@ -29,7 +29,10 @@ Bölge başlıklarıyla gezin (`// ---- ...` yorum satırları):
 - `Kamera`: `startCamera()`, `bindCamera()` (sabitleme için 3 kademeli fallback:
   önizleme→video→kapalı), `chooseCameraSelector()`, `observeZoom()`,
   `applyStartZoom()`, `applyCaptureOptions(locked)` (AE/AWB + odak kilidi, EIS)
-- `Zoom sekanslari`: `resolveZoomRange()` (mod + lensRange + eşik → aralık),
+- `Zoom sekanslari`: `resolveZoomRange()` (mod + lensRange + eşik → aralık;
+  yazılım payı `softAllowance` — ÖN KAMERADA optik zoom yok, DRONIE'nin açılışı
+  tamamen kırpmadan gelir), `twoPointBasis()/rebaseCoord()` (İKİ NOKTA motoru:
+  kadrajların ölçüldüğü tabanı çekim tabanına çevirir),
   `curveInterpolator()`, `buildSequence()`, `buildStepSequence()`
 - `Cekim akisi`: `onShutter()`, `withCountdown()/cancelCountdown()`, `takePhoto()`,
   `startRecording(sequence?)`, `stopShot()`, `setRecordingUi()`

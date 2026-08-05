@@ -103,10 +103,13 @@
     <string name="summary_sep"> · </string>
 
     <!-- Rehberler -->
-    <string name="vertigo_guide">Kayıt boyunca özneye doğru sabit hızda yürü</string>
+    <string name="drone_guide">DRONE: merkezden, tek lenste, kesintisiz zoom rampası</string>
+    <string name="boomerang_guide">BUMERANG: uzaklaşır, döner, geri gelir · süre gidiş-dönüşün tamamı</string>
+    <string name="step_guide">KADEMELİ: duraklamalı sıçramalarla zoom · kademe sayısı süreye göre 3-5</string>
+    <string name="vertigo_guide">VERTİGO: kayıt boyunca özneye doğru sabit hızda yürü, zoom ters yönde açılır</string>
     <string name="reveal_guide">AÇILIŞ: çekim seçtiğin kareden başlar, geniş açıya açılır · kareyi BAŞLANGIÇ KARESİ tuşuyla seç</string>
     <string name="two_point_guide">İKİ NOKTA: çekim 1. sahne kadrajından başlar, 2. sahne kadrajında biter · tuşlara dokunup kadrajları kur</string>
-    <string name="dronie_guide">Telefonu yüzüne yakın tut, çekim uzaklaşarak açılır</string>
+    <string name="dronie_guide">DRONIE: telefonu yüzüne yakın tut, kadraj uzaklaşarak açılır · ön kamerada açılış yazılım kırpmasıyla gelir</string>
 
     <!-- Mesajlar -->
     <string name="timelapse_processing">Timelapse hızlandırılıyor…</string>

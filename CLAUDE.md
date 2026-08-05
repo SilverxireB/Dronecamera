@@ -72,6 +72,14 @@ video çekimleri yapar. Kullanıcı dili: Türkçe. Cihaz: Honor Magic 8 Pro
   (`zoomProvider`). Donanımın kademeli zoom adımları böylece hiç devreye girmez.
 - Yazılım zoom açıkken kayıt 4K; 1080p'ye kırparken 2 kata kadar kayıpsız.
 
+- MOD KURALLARI (hepsi aynı motorda): merkez seçimi yalnız AÇILIŞ + İKİ NOKTA;
+  hız eğrisi TIMELAPSE ve VERTİGO'da yok (biri zamanı sıkıştırır, öteki yürüyüş
+  hızına eşlenir); her modun kendi rehber satırı var, TAM menzil uyarısı öne geçer.
+  VERTİGO menzili GENİŞ lensin sınırlarından türer (tek lens kuralı), KADEMELİ'nin
+  kademe sayısı süreden gelir (3/4/5).
+- Çekim/prova/timelapse bitince `resetToStartFrame()` — görüntü+kırpma+rozet
+  birlikte başlangıç kadrajına döner. Tek kapı burası, yeni akış eklersen çağır.
+
 ## Bekleyen fikirler
 
 Timelapse+zoom, zoom sırasında foto serisi, slow-motion, özne takibi (ML Kit).
