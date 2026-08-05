@@ -91,6 +91,8 @@ class MainActivity : AppCompatActivity() {
     private var zoomProcessor: ZoomSurfaceProcessor? = null
     /** GPU kirpma hatti kurulabildi mi (kadraj merkezi ve timelapse buna bagli). */
     private var effectActive = true
+    /** O an bagli kameranin on/arka olusu — gereksiz yeniden baglamayi onler. */
+    private var boundFront = false
     private var lastOpticalRequested = 1f
     /**
      * Yazilim zoom acikken optik zoom cekim boyunca bu sabit degerde tutulur;
@@ -452,7 +454,10 @@ class MainActivity : AppCompatActivity() {
                 savePrefs()
                 applyModeToUi()
                 refreshAll()
-                bindCamera()
+                // Kamera yalnizca on/arka degisiyorsa yeniden baglanir;
+                // aksi halde sadece kadraj tazelenir (siyah ekran ve
+                // baglama yarisi olmaz).
+                if (m.usesFrontCamera != boundFront) bindCamera() else applyStartZoom()
             }
             binding.modeRow.addView(item)
             m to item
@@ -629,8 +634,14 @@ class MainActivity : AppCompatActivity() {
             Triple(label, isA, chip)
         }
         refreshers += {
-            chips.forEach { (_, isA, chip) ->
-                styleChip(chip, (if (isA) pointA else pointB) != null)
+            chips.forEach { (label, isA, chip) ->
+                val point = if (isA) pointA else pointB
+                chip.text = if (point == null) {
+                    getString(R.string.point_slot_empty, label)
+                } else {
+                    getString(R.string.point_slot_set, label, fmtZoom(point.zoom))
+                }
+                styleChip(chip, point != null)
             }
         }
     }
@@ -952,6 +963,10 @@ class MainActivity : AppCompatActivity() {
         // bozar; kayit ve prova boyunca dokunuslar yutulur. Bos zamanda tek
         // dokunus kadraj merkezini, cift dokunus merkezi sifirlar.
         val tapDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            // Jest akisinin bize gelmesi icin DOWN'i sahipleniyoruz; aksi
+            // halde bazi durumlarda tek dokunus hic tetiklenmiyor.
+            override fun onDown(e: MotionEvent): Boolean = true
+
             // Confirmed: cift dokunusun ilk vurusunda merkez bosuna kaymasin.
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 setFrameCenter(e.x, e.y)
@@ -983,10 +998,13 @@ class MainActivity : AppCompatActivity() {
             }
         )
         binding.previewView.setOnTouchListener { _, event ->
-            if (isBusy()) return@setOnTouchListener true
-            var handled = false
-            if (mode == CameraMode.TWO_POINT) handled = pinchDetector.onTouchEvent(event)
-            handled or tapDetector.onTouchEvent(event)
+            if (!isBusy()) {
+                if (mode == CameraMode.TWO_POINT) pinchDetector.onTouchEvent(event)
+                tapDetector.onTouchEvent(event)
+            }
+            // Dokunuslari her zaman tuketiyoruz: onizlemenin kendi odak/zoom
+            // jestleri bizim kadraj yonetimimizle catisiyor.
+            true
         }
 
         refreshers += { updateSummary() }
@@ -1412,6 +1430,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             camera = provider.bindToLifecycle(this, selector, group.build())
+            boundFront = mode.usesFrontCamera
             observeZoom()
             applyCaptureOptions(locked = false)
             applyExposure()
@@ -1456,8 +1475,10 @@ class MainActivity : AppCompatActivity() {
             .build()
     }
 
-    private val zoomObserver = Observer<ZoomState> { state ->
-        updateZoomBadge(state.zoomRatio * softZoomLevel)
+    private val zoomObserver = Observer<ZoomState> { _ ->
+        // Rozet yalnizca applyEffectiveZoom tarafindan yazilir. Gozlemci de
+        // yazsaydi optik ve yazilim degerleri farkli anlarda guncellendigi
+        // icin arada yanlis degerler gorunurdu.
         updateLensLabels()
         updateSummary()
         // Zoom durumu baglanmadan hemen sonra hazir olmayabiliyor; baslangic

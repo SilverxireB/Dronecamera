@@ -94,6 +94,8 @@
 
     <!-- Iki nokta -->
     <string name="point_a">A</string>
+    <string name="point_slot_empty">%s: boş</string>
+    <string name="point_slot_set">%1$s: %2$sx</string>
     <string name="point_b">B</string>
     <string name="point_saved">%s kadrajı kaydedildi</string>
     <string name="point_recalled">%s kadrajına gidildi</string>
@@ -105,9 +107,9 @@
 
     <!-- Rehberler -->
     <string name="vertigo_guide">Kayıt boyunca özneye doğru sabit hızda yürü</string>
-    <string name="reveal_guide">Özneye dokun: çekim oradan başlayıp geniş açıya açılır</string>
-    <string name="pan_guide">Kaydırma için yazılım zoom gerekir — pay ne kadar çoksa o kadar geniş kayar</string>
-    <string name="two_point_guide">Parmakla zoom kur, dokunarak merkez seç, sonra A veya B tuşunu basılı tut</string>
+    <string name="reveal_guide">Özneye dokun (halka çıkar), sonra çek: kadraj oradan geniş açıya açılır</string>
+    <string name="pan_guide">Kaydırma payı yazılım zoom kadardır — daha geniş kaydırma için +3x seç</string>
+    <string name="two_point_guide">1) Parmakla zoom + dokunarak merkez kur  2) A tuşunu BASILI TUT  3) Yeni kadraj kur, B tuşunu BASILI TUT  4) Çek</string>
     <string name="dronie_guide">Telefonu yüzüne yakın tut, çekim uzaklaşarak açılır</string>
 
     <!-- Mesajlar -->
